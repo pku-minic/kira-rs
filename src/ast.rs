@@ -1,3 +1,12 @@
+pub struct CompUnit {
+  pub items: Vec<GlobalItem>,
+}
+
+pub enum GlobalItem {
+  Decl(Decl),
+  FuncDef(FuncDef),
+}
+
 pub enum Decl {
   Const(ConstDecl),
   Var(VarDecl),
