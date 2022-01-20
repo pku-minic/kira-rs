@@ -47,8 +47,7 @@ pub enum FuncType {
 
 pub struct FuncFParam {
   pub id: String,
-  pub is_arr: bool,
-  pub dims: Vec<ConstExp>,
+  pub dims: Option<Vec<ConstExp>>,
 }
 
 pub struct Block {
