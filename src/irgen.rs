@@ -1,5 +1,5 @@
 use crate::ast::*;
-use koopa::ir::{Function, Program};
+use koopa::ir::{BinaryOp, Function, Program};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -379,43 +379,50 @@ impl<'ast> GenerateProgram<'ast> for ConstExp {
   }
 }
 
-impl<'ast> GenerateProgram<'ast> for UnaryOp {
-  type Out = ();
-
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
-  }
-}
-
 impl<'ast> GenerateProgram<'ast> for MulOp {
-  type Out = ();
+  type Out = BinaryOp;
 
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+  fn generate(&'ast self, _: &mut Program, _: &mut Scopes<'ast>) -> Result<Self::Out> {
+    Ok(match self {
+      MulOp::Mul => BinaryOp::Mul,
+      MulOp::Div => BinaryOp::Div,
+      MulOp::Mod => BinaryOp::Mod,
+    })
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for AddOp {
-  type Out = ();
+  type Out = BinaryOp;
 
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+  fn generate(&'ast self, _: &mut Program, _: &mut Scopes<'ast>) -> Result<Self::Out> {
+    Ok(match self {
+      AddOp::Add => BinaryOp::Add,
+      AddOp::Sub => BinaryOp::Sub,
+    })
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for RelOp {
-  type Out = ();
+  type Out = BinaryOp;
 
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+  fn generate(&'ast self, _: &mut Program, _: &mut Scopes<'ast>) -> Result<Self::Out> {
+    Ok(match self {
+      RelOp::Lt => BinaryOp::Lt,
+      RelOp::Gt => BinaryOp::Gt,
+      RelOp::Le => BinaryOp::Le,
+      RelOp::Ge => BinaryOp::Ge,
+    })
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for EqOp {
-  type Out = ();
+  type Out = BinaryOp;
 
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+  fn generate(&'ast self, _: &mut Program, _: &mut Scopes<'ast>) -> Result<Self::Out> {
+    Ok(match self {
+      EqOp::Eq => BinaryOp::Eq,
+      EqOp::Neq => BinaryOp::NotEq,
+    })
   }
 }
 
