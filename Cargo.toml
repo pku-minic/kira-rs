@@ -2,7 +2,7 @@
 name = "kira-rs"
 version = "0.0.1"
 authors = ["MaxXing <x@MaxXSoft.net>"]
-edition = "2021"
+edition = "2018"
 
 [build-dependencies]
 lalrpop = "0.19.6"
