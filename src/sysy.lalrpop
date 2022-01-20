@@ -2,7 +2,14 @@ use crate::ast::*;
 
 grammar;
 
-pub Decl: Decl = {
+pub CompUnit: CompUnit = <items: (GlobalItem)*> => CompUnit { <> };
+
+GlobalItem: GlobalItem = {
+  Decl => GlobalItem::Decl(<>),
+  FuncDef => GlobalItem::FuncDef(<>),
+}
+
+Decl: Decl = {
   ConstDecl => Decl::Const(<>),
   VarDecl => Decl::Var(<>),
 }
@@ -51,21 +58,20 @@ InitVal: InitVal = {
   },
 }
 
-pub FuncDef: FuncDef = {
-  <ty: FuncType> <id: Ident> "(" ")" <block: Block> => {
-    FuncDef { ty, id, params: Vec::new(), block }
+FuncDef: FuncDef = {
+  <head: FuncDefHead> ")" <block: Block> => {
+    FuncDef { ty: head.0, id: head.1, params: Vec::new(), block }
   },
-  <ty: FuncType> <id: Ident>
-  "(" <param: FuncFParam> <mut params: ("," <FuncFParam>)*> ")"
+  <head: FuncDefHead> <param: FuncFParam> <mut params: ("," <FuncFParam>)*> ")"
   <block: Block> => {
     params.insert(0, param);
-    FuncDef { ty, id, params, block }
+    FuncDef { ty: head.0, id: head.1, params, block }
   },
 }
 
-FuncType: FuncType = {
-  "void" => FuncType::Void,
-  "int" => FuncType::Int,
+FuncDefHead: (FuncType, String) = {
+  "void" <id: Ident> "(" => (FuncType::Void, <>),
+  "int" <id: Ident> "(" => (FuncType::Int, <>),
 }
 
 FuncFParam: FuncFParam = {
