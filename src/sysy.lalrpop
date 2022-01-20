@@ -1,0 +1,198 @@
+use crate::ast::*;
+
+grammar;
+
+pub Decl: Decl = {
+  ConstDecl => Decl::Const(<>),
+  VarDecl => Decl::Var(<>),
+}
+
+ConstDecl: ConstDecl = {
+  "const" "int" <def: ConstDef> <mut defs: ("," <ConstDef>)*> ";" => {
+    defs.insert(0, def);
+    ConstDecl { defs }
+  },
+}
+
+ConstDef: ConstDef = {
+  <id: Ident> <dims: ("[" <ConstExp> "]")*> "=" <init: ConstInitVal> => {
+    ConstDef { <> }
+  },
+}
+
+ConstInitVal: ConstInitVal = {
+  ConstExp => ConstInitVal::Exp(<>),
+  "{" "}" => ConstInitVal::List(Vec::new()),
+  "{" <init: ConstInitVal> <mut inits: ("," <ConstInitVal>)*> "}" => {
+    inits.insert(0, init);
+    ConstInitVal::List(inits)
+  },
+}
+
+VarDecl: VarDecl = {
+  "int" <def: VarDef> <mut defs: ("," <VarDef>)*> ";" => {
+    defs.insert(0, def);
+    VarDecl { defs }
+  },
+}
+
+VarDef: VarDef = {
+  <id: Ident> <dims: ("[" <ConstExp> "]")*> <init: ("=" <InitVal>)?> => {
+    VarDef { <> }
+  },
+}
+
+InitVal: InitVal = {
+  Exp => InitVal::Exp(<>),
+  "{" "}" => InitVal::List(Vec::new()),
+  "{" <init: InitVal> <mut inits: ("," <InitVal>)*> "}" => {
+    inits.insert(0, init);
+    InitVal::List(inits)
+  },
+}
+
+pub FuncDef: FuncDef = {
+  <ty: FuncType> <id: Ident> "(" ")" <block: Block> => {
+    FuncDef { ty, id, params: Vec::new(), block }
+  },
+  <ty: FuncType> <id: Ident>
+  "(" <param: FuncFParam> <mut params: ("," <FuncFParam>)*> ")"
+  <block: Block> => {
+    params.insert(0, param);
+    FuncDef { ty, id, params, block }
+  },
+}
+
+FuncType: FuncType = {
+  "void" => FuncType::Void,
+  "int" => FuncType::Int,
+}
+
+FuncFParam: FuncFParam = {
+  "int" <id: Ident> <dims: ("[" "]" <("[" <ConstExp> "]")*>)?> => {
+    FuncFParam { <> }
+  },
+}
+
+Block: Block = "{" <items: (BlockItem)*> "}" => Block { <> };
+
+BlockItem: BlockItem = {
+  Decl => BlockItem::Decl(<>),
+  Stmt => BlockItem::Stmt(<>),
+}
+
+Stmt: Stmt = {
+  <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(Assign { <> }),
+  <exp: (Exp)?> ";" => Stmt::ExpStmt(ExpStmt { <> }),
+  Block => Stmt::Block(<>),
+  "if" "(" <cond: Exp> ")" <then: Stmt> <else_then: ("else" <Stmt>)?> => {
+    Stmt::If(Box::new(If { <> }))
+  },
+  "while" "(" <cond: Exp> ")" <body: Stmt> => {
+    Stmt::While(Box::new(While { <> }))
+  },
+  "break" ";" => Stmt::Break,
+  "continue" ";" => Stmt::Continue,
+  "return" <exp: (Exp)?> ";" => Stmt::Return(Return { <> }),
+}
+
+Exp: Exp = <lor: LOrExp> => Exp { <> };
+
+LVal: LVal = <id: Ident> <dims: ("{" <Exp> "}")*> => LVal { <> };
+
+PrimaryExp: PrimaryExp = {
+  "(" <Exp> ")" => PrimaryExp::Exp(Box::new(<>)),
+  LVal => PrimaryExp::LVal(<>),
+  Number => PrimaryExp::Number(<>),
+}
+
+UnaryExp: UnaryExp = {
+  PrimaryExp => UnaryExp::Primary(<>),
+  <id: Ident> "(" ")" => UnaryExp::Call(FuncCall { id, params: Vec::new() }),
+  <id: Ident> "(" <param: Exp> <mut params: ("," <Exp>)*> ")" => {
+    params.insert(0, param);
+    UnaryExp::Call(FuncCall { id, params })
+  },
+  "+" <UnaryExp> => <>,
+  <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Unary(op, Box::new(exp)),
+}
+
+MulExp: MulExp = {
+  UnaryExp => MulExp::Unary(<>),
+  <lhs: MulExp> <op: MulOp> <rhs: UnaryExp> => {
+    MulExp::MulUnary(Box::new(lhs), op, rhs)
+  },
+}
+
+AddExp: AddExp = {
+  MulExp => AddExp::Mul(<>),
+  <lhs: AddExp> <op: AddOp> <rhs: MulExp> => {
+    AddExp::AddMul(Box::new(lhs), op, rhs)
+  },
+}
+
+RelExp: RelExp = {
+  AddExp => RelExp::Add(<>),
+  <lhs: RelExp> <op: RelOp> <rhs: AddExp> => {
+    RelExp::RelAdd(Box::new(lhs), op, rhs)
+  },
+}
+
+EqExp: EqExp = {
+  RelExp => EqExp::Rel(<>),
+  <lhs: EqExp> <op: EqOp> <rhs: RelExp> => {
+    EqExp::EqRel(Box::new(lhs), op, rhs)
+  },
+}
+
+LAndExp: LAndExp = {
+  EqExp => LAndExp::Eq(<>),
+  <lhs: LAndExp> "&&" <rhs: EqExp> => {
+    LAndExp::LAndEq(Box::new(lhs), rhs)
+  },
+}
+
+LOrExp: LOrExp = {
+  LAndExp => LOrExp::LAnd(<>),
+  <lhs: LOrExp> "||" <rhs: LAndExp> => {
+    LOrExp::LOrLAnd(Box::new(lhs), rhs)
+  },
+}
+
+ConstExp: ConstExp = <exp: AddExp> => ConstExp { <> };
+
+Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
+
+Number: i32 = {
+  r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
+  r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
+  r"0(x|X)[0-9a-fA-F][0-9a-fA-F]*" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+}
+
+UnaryOp: UnaryOp = {
+  "-" => UnaryOp::Neg,
+  "!" => UnaryOp::LNot,
+}
+
+MulOp: MulOp = {
+  "*" => MulOp::Mul,
+  "/" => MulOp::Div,
+  "%" => MulOp::Mod,
+}
+
+AddOp: AddOp = {
+  "+" => AddOp::Add,
+  "-" => AddOp::Sub,
+}
+
+RelOp: RelOp = {
+  "<" => RelOp::Lt,
+  ">" => RelOp::Gt,
+  "<=" => RelOp::Le,
+  ">=" => RelOp::Ge,
+}
+
+EqOp: EqOp = {
+  "==" => EqOp::Eq,
+  "!=" => EqOp::Neq,
+}
