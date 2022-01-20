@@ -160,7 +160,7 @@ pub enum LOrExp {
 }
 
 pub struct ConstExp {
-  pub exp: AddExp,
+  pub exp: Exp,
 }
 
 pub enum UnaryOp {

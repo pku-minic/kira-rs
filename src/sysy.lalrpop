@@ -184,7 +184,7 @@ LOrExp: LOrExp = {
   },
 }
 
-ConstExp: ConstExp = <exp: AddExp> => ConstExp { <> };
+ConstExp: ConstExp = <exp: Exp> => ConstExp { <> };
 
 Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 
