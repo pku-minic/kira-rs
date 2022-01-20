@@ -1,6 +1,12 @@
 [package]
 name = "kira-rs"
 version = "0.0.1"
+authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2021"
 
+[build-dependencies]
+lalrpop = "0.19.6"
+
 [dependencies]
+lalrpop-util = "0.19.6"
+regex = "1"
