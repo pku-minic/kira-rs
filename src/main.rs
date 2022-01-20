@@ -1,5 +1,7 @@
 mod ast;
+mod irgen;
 
+use koopa::back::KoopaGenerator;
 use lalrpop_util::lalrpop_mod;
 use std::env::args;
 use std::fs::read_to_string;
@@ -27,6 +29,14 @@ fn try_main() -> Result<(), Error> {
   let comp_unit = sysy::CompUnitParser::new()
     .parse(&input)
     .map_err(|_| Error::Parse)?;
+  // generate IR
+  let program = irgen::generate_program(&comp_unit).map_err(Error::Generate)?;
+  if matches!(mode, Mode::Koopa) {
+    return KoopaGenerator::from_path(output)
+      .map_err(Error::File)?
+      .generate_on(&program)
+      .map_err(Error::Io);
+  }
   todo!()
 }
 
@@ -35,14 +45,18 @@ enum Error {
   InvalidArgs,
   File(io::Error),
   Parse,
+  Generate(irgen::Error),
+  Io(io::Error),
 }
 
 impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      Error::InvalidArgs => write!(f, ""),
-      Error::File(err) => write!(f, "invalid input SysY file: {}", err),
-      Error::Parse => write!(f, "error occurred while parsing"),
+      Self::InvalidArgs => write!(f, ""),
+      Self::File(err) => write!(f, "invalid input SysY file: {}", err),
+      Self::Parse => write!(f, "error occurred while parsing"),
+      Self::Generate(err) => write!(f, "{}", err),
+      Self::Io(err) => write!(f, "I/O error: {}", err),
     }
   }
 }
