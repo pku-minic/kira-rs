@@ -526,7 +526,33 @@ impl<'ast> GenerateProgram<'ast> for If {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // generate condition
+    let cond = self.cond.generate(program, scopes)?;
+    // generate branch and then/else basic block
+    let info = cur_func_mut!(scopes);
+    let then_bb = info.new_bb(program, Some("%if_then"));
+    let else_bb = info.new_bb(program, Some("%if_else"));
+    let br = info.new_value(program).branch(cond, then_bb, else_bb);
+    info.push_inst(program, br);
+    info.push_bb(program, then_bb);
+    // generate then statement
+    self.then.generate(program, scopes)?;
+    // generate jump and end basic block
+    let info = cur_func_mut!(scopes);
+    let end_bb = info.new_bb(program, Some("%if_end"));
+    let jump = info.new_value(program).jump(end_bb);
+    info.push_inst(program, jump);
+    info.push_bb(program, else_bb);
+    // generate else statement
+    if let Some(else_then) = &self.else_then {
+      else_then.generate(program, scopes)?;
+    }
+    // generate jump
+    let info = cur_func_mut!(scopes);
+    let jump = info.new_value(program).jump(end_bb);
+    info.push_inst(program, jump);
+    info.push_bb(program, end_bb);
+    Ok(())
   }
 }
 
@@ -534,7 +560,31 @@ impl<'ast> GenerateProgram<'ast> for While {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // generate loop entry basic block
+    let info = cur_func_mut!(scopes);
+    let entry_bb = info.new_bb(program, Some("%while_entry"));
+    let jump = info.new_value(program).jump(entry_bb);
+    info.push_inst(program, jump);
+    info.push_bb(program, entry_bb);
+    // generate condition
+    let cond = self.cond.generate(program, scopes)?;
+    // generate branch and loop body/end basic block
+    let info = cur_func_mut!(scopes);
+    let body_bb = info.new_bb(program, Some("%while_body"));
+    let end_bb = info.new_bb(program, Some("%while_end"));
+    let br = info.new_value(program).branch(cond, body_bb, end_bb);
+    info.push_inst(program, br);
+    info.push_bb(program, body_bb);
+    // generate loop body
+    scopes.loop_info.push((entry_bb, end_bb));
+    self.body.generate(program, scopes)?;
+    scopes.loop_info.pop();
+    // generate jump
+    let info = cur_func_mut!(scopes);
+    let jump = info.new_value(program).jump(entry_bb);
+    info.push_inst(program, jump);
+    info.push_bb(program, end_bb);
+    Ok(())
   }
 }
 
@@ -558,10 +608,10 @@ impl<'ast> GenerateProgram<'ast> for Continue {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    // jump to the begin of loop
+    // jump to the entry of loop
     let info = &mut cur_func_mut!(scopes);
-    let (begin, _) = scopes.loop_info.last().ok_or(Error::NotInLoop)?;
-    let jump = info.new_value(program).jump(*begin);
+    let (entry, _) = scopes.loop_info.last().ok_or(Error::NotInLoop)?;
+    let jump = info.new_value(program).jump(*entry);
     info.push_inst(program, jump);
     // push new basic block
     let next = info.new_bb(program, None);
