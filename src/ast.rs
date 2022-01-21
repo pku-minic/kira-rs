@@ -130,7 +130,7 @@ pub enum UnaryExp {
 
 pub struct FuncCall {
   pub id: String,
-  pub params: Vec<Exp>,
+  pub args: Vec<Exp>,
 }
 
 pub enum MulExp {

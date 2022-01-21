@@ -133,10 +133,10 @@ PrimaryExp: PrimaryExp = {
 
 UnaryExp: UnaryExp = {
   PrimaryExp => UnaryExp::Primary(<>),
-  <id: Ident> "(" ")" => UnaryExp::Call(FuncCall { id, params: Vec::new() }),
-  <id: Ident> "(" <param: Exp> <mut params: ("," <Exp>)*> ")" => {
-    params.insert(0, param);
-    UnaryExp::Call(FuncCall { id, params })
+  <id: Ident> "(" ")" => UnaryExp::Call(FuncCall { id, args: Vec::new() }),
+  <id: Ident> "(" <arg: Exp> <mut args: ("," <Exp>)*> ")" => {
+    args.insert(0, arg);
+    UnaryExp::Call(FuncCall { id, args })
   },
   "+" <UnaryExp> => <>,
   <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Unary(op, Box::new(exp)),
