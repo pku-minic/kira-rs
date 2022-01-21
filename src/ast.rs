@@ -74,8 +74,8 @@ pub enum Stmt {
   Block(Block),
   If(Box<If>),
   While(Box<While>),
-  Break,
-  Continue,
+  Break(Break),
+  Continue(Continue),
   Return(Return),
 }
 
@@ -98,6 +98,10 @@ pub struct While {
   pub cond: Exp,
   pub body: Stmt,
 }
+
+pub struct Break;
+
+pub struct Continue;
 
 pub struct Return {
   pub exp: Option<Exp>,
