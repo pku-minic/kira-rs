@@ -1,7 +1,7 @@
 use crate::ast::*;
 use koopa::ir::Value as IrValue;
 use koopa::ir::{builder::LocalBuilder, builder_traits::*};
-use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type};
+use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, TypeKind};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -18,6 +18,20 @@ struct Scopes<'ast> {
   funcs: HashMap<&'ast str, Function>,
   cur_func: Option<FunctionInfo>,
   loop_info: Vec<(BasicBlock, BasicBlock)>,
+}
+
+/// Returns a reference to the current function information.
+macro_rules! cur_func {
+  ($scopes:expr) => {
+    $scopes.cur_func.as_ref().unwrap()
+  };
+}
+
+/// Returns a mutable reference to the current function information.
+macro_rules! cur_func_mut {
+  ($scopes:expr) => {
+    $scopes.cur_func.as_mut().unwrap()
+  };
 }
 
 impl<'ast> Scopes<'ast> {
@@ -84,20 +98,20 @@ impl<'ast> Scopes<'ast> {
   fn exit(&mut self) {
     self.vals.pop();
   }
-}
 
-/// Returns a reference to the current function information.
-macro_rules! cur_func {
-  ($scopes:expr) => {
-    $scopes.cur_func.as_ref().unwrap()
-  };
-}
-
-/// Returns a mutable reference to the current function information.
-macro_rules! cur_func_mut {
-  ($scopes:expr) => {
-    $scopes.cur_func.as_mut().unwrap()
-  };
+  /// Returns type of the given value.
+  fn ty(&self, program: &Program, value: IrValue) -> Type {
+    if value.is_global() {
+      program.borrow_value(value).ty().clone()
+    } else {
+      program
+        .func(cur_func!(self).func)
+        .dfg()
+        .value(value)
+        .ty()
+        .clone()
+    }
+  }
 }
 
 /// Function information.
@@ -198,8 +212,20 @@ impl FunctionInfo {
 enum Value {
   /// Koopa IR value.
   Value(IrValue),
+  /// Function parameter.
+  Param(IrValue),
   /// Constant integer.
   Const(i32),
+}
+
+impl Value {
+  /// Returns type of the current value.
+  fn ty(&self, program: &Program, scopes: &Scopes) -> Type {
+    match self {
+      Self::Value(value) | Self::Param(value) => scopes.ty(program, *value),
+      Self::Const(_) => Type::get_i32(),
+    }
+  }
 }
 
 /// Error returned by IR generator.
@@ -210,6 +236,9 @@ pub enum Error {
   InvalidArrayLen,
   NotInLoop,
   RetValInVoidFunc,
+  DerefInt,
+  UseVoidValue,
+  ArgMismatch,
 }
 
 impl fmt::Display for Error {
@@ -221,6 +250,9 @@ impl fmt::Display for Error {
       Self::InvalidArrayLen => write!(f, "invalid array length"),
       Self::NotInLoop => write!(f, "using break/continue outside of loop"),
       Self::RetValInVoidFunc => write!(f, "returning value in void fucntion"),
+      Self::DerefInt => write!(f, "dereferencing an integer"),
+      Self::UseVoidValue => write!(f, "using a void value"),
+      Self::ArgMismatch => write!(f, "argument mismatch"),
     }
   }
 }
@@ -568,36 +600,100 @@ impl<'ast> GenerateProgram<'ast> for Exp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    self.lor.generate(program, scopes)
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for LVal {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // handle constant
+    let (is_param, v, mut value) = match scopes.value(&self.id)? {
+      v @ Value::Value(value) => (false, v, *value),
+      v @ Value::Param(value) => (true, v, *value),
+      Value::Const(num) => {
+        return self
+          .indices
+          .is_empty()
+          .then(|| cur_func!(scopes).new_value(program).integer(*num))
+          .ok_or(Error::DerefInt);
+      }
+    };
+    // handle value and parameter
+    let mut first = true;
+    let mut ty = v.ty(program, scopes);
+    for index in &self.indices {
+      // generate index
+      let index = index.generate(program, scopes)?;
+      // check if is valid
+      match ty.kind() {
+        TypeKind::Pointer(base) => match base.kind() {
+          TypeKind::Int32 if is_param && first => (),
+          TypeKind::Array(..) => (),
+          _ => return Err(Error::DerefInt),
+        },
+        _ => return Err(Error::DerefInt),
+      }
+      // generate pointer calculation
+      let info = cur_func!(scopes);
+      if is_param && first {
+        value = info.new_value(program).get_ptr(value, index);
+      } else {
+        value = info.new_value(program).get_elem_ptr(value, index);
+      }
+      // update type
+      ty = program.func(info.func).dfg().value(value).ty().clone();
+      // push to the current basic block
+      info.push_inst(program, value);
+      first = false;
+    }
+    // generate load
+    if !ty.is_i32() {
+      let info = cur_func!(scopes);
+      value = info.new_value(program).load(value);
+      info.push_inst(program, value);
+    }
+    Ok(value)
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for PrimaryExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Exp(exp) => exp.generate(program, scopes),
+      Self::LVal(lval) => lval.generate(program, scopes),
+      Self::Number(num) => Ok(cur_func!(scopes).new_value(program).integer(*num)),
+    }
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for UnaryExp {
-  type Out = ();
+  type Out = Option<IrValue>;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Primary(exp) => exp.generate(program, scopes).map(Some),
+      Self::Call(call) => call.generate(program, scopes),
+      Self::Unary(op, exp) => {
+        let exp = exp.generate(program, scopes)?.ok_or(Error::UseVoidValue)?;
+        let info = cur_func!(scopes);
+        let zero = info.new_value(program).integer(0);
+        let value = match op {
+          UnaryOp::Neg => info.new_value(program).binary(BinaryOp::Sub, zero, exp),
+          UnaryOp::LNot => info.new_value(program).binary(BinaryOp::Eq, exp, zero),
+        };
+        info.push_inst(program, value);
+        Ok(Some(value))
+      }
+    }
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for FuncCall {
-  type Out = ();
+  type Out = Option<IrValue>;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -605,7 +701,7 @@ impl<'ast> GenerateProgram<'ast> for FuncCall {
 }
 
 impl<'ast> GenerateProgram<'ast> for MulExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -613,7 +709,7 @@ impl<'ast> GenerateProgram<'ast> for MulExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for AddExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -621,7 +717,7 @@ impl<'ast> GenerateProgram<'ast> for AddExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for RelExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -629,7 +725,7 @@ impl<'ast> GenerateProgram<'ast> for RelExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for EqExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -637,7 +733,7 @@ impl<'ast> GenerateProgram<'ast> for EqExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for LAndExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -645,7 +741,7 @@ impl<'ast> GenerateProgram<'ast> for LAndExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for LOrExp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
@@ -721,7 +817,7 @@ impl Evaluate for Exp {
 impl Evaluate for LVal {
   fn eval(&self, scopes: &Scopes) -> Option<i32> {
     let val = scopes.value(&self.id).ok()?;
-    if self.dims.is_empty() {
+    if self.indices.is_empty() {
       match val {
         Value::Const(i) => Some(*i),
         _ => None,
