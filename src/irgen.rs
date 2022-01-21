@@ -178,10 +178,10 @@ impl FunctionInfo {
   }
 
   /// Creates a new allocation and inserts to the entry block.
-  fn new_alloc(&self, program: &mut Program, ty: Type) -> Value {
+  fn new_alloc(&self, program: &mut Program, ty: Type) -> IrValue {
     let alloc = self.new_value(program).alloc(ty);
     self.push_inst_to(program, self.entry, alloc);
-    Value::Value(alloc)
+    alloc
   }
 
   /// Seals the entry block.
@@ -696,7 +696,34 @@ impl<'ast> GenerateProgram<'ast> for FuncCall {
   type Out = Option<IrValue>;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // get function from scope
+    let func = scopes.func(&self.id)?;
+    // get function type
+    let (params_ty, is_void) = match program.func(func).ty().kind() {
+      TypeKind::Function(params, ret) => (params.clone(), ret.is_unit()),
+      _ => unreachable!(),
+    };
+    // generate arguments
+    let args = self
+      .args
+      .iter()
+      .map(|arg| arg.generate(program, scopes))
+      .collect::<Result<Vec<_>>>()?;
+    // check argument types
+    if params_ty.len() != args.len() {
+      return Err(Error::ArgMismatch);
+    }
+    for (param_ty, arg) in params_ty.iter().zip(&args) {
+      if param_ty != &scopes.ty(program, *arg) {
+        return Err(Error::ArgMismatch);
+      }
+    }
+    // generate function call
+    let info = cur_func!(scopes);
+    let call = info.new_value(program).call(func, args);
+    info.push_inst(program, call);
+    // return value if not void
+    Ok((!is_void).then(|| call))
   }
 }
 
@@ -704,7 +731,18 @@ impl<'ast> GenerateProgram<'ast> for MulExp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Unary(exp) => exp.generate(program, scopes)?.ok_or(Error::UseVoidValue),
+      Self::MulUnary(lhs, op, rhs) => {
+        let lhs = lhs.generate(program, scopes)?;
+        let rhs = rhs.generate(program, scopes)?.ok_or(Error::UseVoidValue)?;
+        let op = op.generate(program, scopes)?;
+        let info = cur_func!(scopes);
+        let value = info.new_value(program).binary(op, lhs, rhs);
+        info.push_inst(program, value);
+        Ok(value)
+      }
+    }
   }
 }
 
@@ -712,7 +750,18 @@ impl<'ast> GenerateProgram<'ast> for AddExp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Mul(exp) => exp.generate(program, scopes),
+      Self::AddMul(lhs, op, rhs) => {
+        let lhs = lhs.generate(program, scopes)?;
+        let rhs = rhs.generate(program, scopes)?;
+        let op = op.generate(program, scopes)?;
+        let info = cur_func!(scopes);
+        let value = info.new_value(program).binary(op, lhs, rhs);
+        info.push_inst(program, value);
+        Ok(value)
+      }
+    }
   }
 }
 
@@ -720,7 +769,18 @@ impl<'ast> GenerateProgram<'ast> for RelExp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Add(exp) => exp.generate(program, scopes),
+      Self::RelAdd(lhs, op, rhs) => {
+        let lhs = lhs.generate(program, scopes)?;
+        let rhs = rhs.generate(program, scopes)?;
+        let op = op.generate(program, scopes)?;
+        let info = cur_func!(scopes);
+        let value = info.new_value(program).binary(op, lhs, rhs);
+        info.push_inst(program, value);
+        Ok(value)
+      }
+    }
   }
 }
 
@@ -728,15 +788,69 @@ impl<'ast> GenerateProgram<'ast> for EqExp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Rel(exp) => exp.generate(program, scopes),
+      Self::EqRel(lhs, op, rhs) => {
+        let lhs = lhs.generate(program, scopes)?;
+        let rhs = rhs.generate(program, scopes)?;
+        let op = op.generate(program, scopes)?;
+        let info = cur_func!(scopes);
+        let value = info.new_value(program).binary(op, lhs, rhs);
+        info.push_inst(program, value);
+        Ok(value)
+      }
+    }
   }
+}
+
+/// Generates logical operators.
+macro_rules! generate_logical_ops {
+  (
+    $lhs:expr, $rhs:expr, $program:expr, $scopes:expr,
+    $prefix:literal, $rhs_bb:ident, $end_bb:ident, $tbb:ident, $fbb:ident
+  ) => {{
+    // generate result
+    let result = cur_func!($scopes).new_alloc($program, Type::get_i32());
+    // generate left-hand side expression
+    let lhs = $lhs.generate($program, $scopes)?;
+    let info = cur_func_mut!($scopes);
+    let zero = info.new_value($program).integer(0);
+    let lhs = info.new_value($program).binary(BinaryOp::NotEq, lhs, zero);
+    let store = info.new_value($program).store(lhs, result);
+    info.push_inst($program, store);
+    // generate basic blocks and branch
+    let $rhs_bb = info.new_bb($program, Some(concat!("%", $prefix, "_rhs")));
+    let $end_bb = info.new_bb($program, Some(concat!("%", $prefix, "_end")));
+    let br = info.new_value($program).branch(lhs, $tbb, $fbb);
+    info.push_inst($program, br);
+    // generate right-hand side expression
+    info.push_bb($program, $rhs_bb);
+    let rhs = $rhs.generate($program, $scopes)?;
+    let info = cur_func_mut!($scopes);
+    let rhs = info.new_value($program).binary(BinaryOp::NotEq, rhs, zero);
+    let store = info.new_value($program).store(rhs, result);
+    info.push_inst($program, store);
+    // generate jump
+    let jump = info.new_value($program).jump($end_bb);
+    info.push_inst($program, jump);
+    info.push_bb($program, $end_bb);
+    // generate load
+    let load = info.new_value($program).load(result);
+    info.push_inst($program, load);
+    Ok(load)
+  }};
 }
 
 impl<'ast> GenerateProgram<'ast> for LAndExp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Eq(exp) => exp.generate(program, scopes),
+      Self::LAndEq(lhs, rhs) => generate_logical_ops! {
+        lhs, rhs, program, scopes, "land", rhs_bb, end_bb, rhs_bb, end_bb
+      },
+    }
   }
 }
 
@@ -744,7 +858,12 @@ impl<'ast> GenerateProgram<'ast> for LOrExp {
   type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::LAnd(exp) => exp.generate(program, scopes),
+      Self::LOrLAnd(lhs, rhs) => generate_logical_ops! {
+        lhs, rhs, program, scopes, "lor", rhs_bb, end_bb, end_bb, rhs_bb
+      },
+    }
   }
 }
 
