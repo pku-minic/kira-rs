@@ -218,16 +218,6 @@ enum Value {
   Const(i32),
 }
 
-impl Value {
-  /// Returns type of the current value.
-  fn ty(&self, program: &Program, scopes: &Scopes) -> Type {
-    match self {
-      Self::Value(value) | Self::Param(value) => scopes.ty(program, *value),
-      Self::Const(_) => Type::get_i32(),
-    }
-  }
-}
-
 /// Error returned by IR generator.
 pub enum Error {
   DuplicatedDef,
@@ -659,9 +649,9 @@ impl<'ast> GenerateProgram<'ast> for LVal {
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     // handle constant
-    let (is_param, v, mut value) = match scopes.value(&self.id)? {
-      v @ Value::Value(value) => (false, v, *value),
-      v @ Value::Param(value) => (true, v, *value),
+    let (is_param, mut value) = match scopes.value(&self.id)? {
+      Value::Value(value) => (false, *value),
+      Value::Param(value) => (true, *value),
       Value::Const(num) => {
         return self
           .indices
@@ -672,7 +662,7 @@ impl<'ast> GenerateProgram<'ast> for LVal {
     };
     // handle value and parameter
     let mut first = true;
-    let mut ty = v.ty(program, scopes);
+    let mut ty = scopes.ty(program, value);
     for index in &self.indices {
       // generate index
       let index = index.generate(program, scopes)?;
