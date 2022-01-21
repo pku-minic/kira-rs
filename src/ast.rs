@@ -113,7 +113,7 @@ pub struct Exp {
 
 pub struct LVal {
   pub id: String,
-  pub dims: Vec<Exp>,
+  pub indices: Vec<Exp>,
 }
 
 pub enum PrimaryExp {
