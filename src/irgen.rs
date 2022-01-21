@@ -1,5 +1,7 @@
 use crate::ast::*;
-use koopa::ir::{BinaryOp, Function, FunctionData, Program, Type};
+use koopa::ir::Value as IrValue;
+use koopa::ir::{builder::LocalBuilder, builder_traits::*};
+use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -14,7 +16,8 @@ pub fn generate_program(comp_unit: &CompUnit) -> Result<Program> {
 struct Scopes<'ast> {
   vals: Vec<HashMap<&'ast str, Value>>,
   funcs: HashMap<&'ast str, Function>,
-  cur_func: Option<Function>,
+  cur_func: Option<FunctionInfo>,
+  loop_info: Vec<(BasicBlock, BasicBlock)>,
 }
 
 impl<'ast> Scopes<'ast> {
@@ -24,6 +27,7 @@ impl<'ast> Scopes<'ast> {
       vals: vec![HashMap::new()],
       funcs: HashMap::new(),
       cur_func: None,
+      loop_info: Vec::new(),
     }
   }
 
@@ -82,10 +86,118 @@ impl<'ast> Scopes<'ast> {
   }
 }
 
+/// Returns a reference to the current function information.
+macro_rules! cur_func {
+  ($scopes:expr) => {
+    $scopes.cur_func.as_ref().unwrap()
+  };
+}
+
+/// Returns a mutable reference to the current function information.
+macro_rules! cur_func_mut {
+  ($scopes:expr) => {
+    $scopes.cur_func.as_mut().unwrap()
+  };
+}
+
+/// Function information.
+struct FunctionInfo {
+  func: Function,
+  entry: BasicBlock,
+  end: BasicBlock,
+  cur: BasicBlock,
+  ret_val: Option<IrValue>,
+}
+
+impl FunctionInfo {
+  /// Creates a new function information.
+  fn new(func: Function, entry: BasicBlock, end: BasicBlock, ret_val: Option<IrValue>) -> Self {
+    Self {
+      func,
+      entry,
+      end,
+      cur: entry,
+      ret_val,
+    }
+  }
+
+  /// Creates a new basic block in function.
+  fn new_bb(&self, program: &mut Program, name: Option<&str>) -> BasicBlock {
+    program
+      .func_mut(self.func)
+      .dfg_mut()
+      .new_bb()
+      .basic_block(name.map(|s| s.into()))
+  }
+
+  /// Creates a new value in function.
+  fn new_value<'func>(&self, program: &'func mut Program) -> LocalBuilder<'func> {
+    program.func_mut(self.func).dfg_mut().new_value()
+  }
+
+  /// Pushes the basic block to the function,
+  /// updates the current basic block.
+  fn push_bb(&mut self, program: &mut Program, bb: BasicBlock) {
+    program
+      .func_mut(self.func)
+      .layout_mut()
+      .bbs_mut()
+      .push_key_back(bb)
+      .unwrap();
+    self.cur = bb;
+  }
+
+  /// Pushes the instruction to the back of the given basic block.
+  fn push_inst_to(&self, program: &mut Program, bb: BasicBlock, inst: IrValue) {
+    program
+      .func_mut(self.func)
+      .layout_mut()
+      .bb_mut(bb)
+      .insts_mut()
+      .push_key_back(inst)
+      .unwrap();
+  }
+
+  /// Pushes the instruction to the back of the current basic block.
+  fn push_inst(&self, program: &mut Program, inst: IrValue) {
+    self.push_inst_to(program, self.cur, inst);
+  }
+
+  /// Creates a new allocation and inserts to the entry block.
+  fn new_alloc(&self, program: &mut Program, ty: Type) -> Value {
+    let alloc = self.new_value(program).alloc(ty);
+    self.push_inst_to(program, self.entry, alloc);
+    Value::Value(alloc)
+  }
+
+  /// Seals the entry block.
+  fn seal_entry(&self, program: &mut Program, next: BasicBlock) {
+    let jump = self.new_value(program).jump(next);
+    self.push_inst_to(program, self.entry, jump);
+  }
+
+  /// Seals the function.
+  fn seal_func(&mut self, program: &mut Program) {
+    // jump to the end basic block
+    let jump = self.new_value(program).jump(self.end);
+    self.push_inst(program, jump);
+    // push the end basic block
+    self.push_bb(program, self.end);
+    // generate return
+    let value = self.ret_val.map(|alloc| {
+      let value = self.new_value(program).load(alloc);
+      self.push_inst(program, value);
+      value
+    });
+    let ret = self.new_value(program).ret(value);
+    self.push_inst(program, ret);
+  }
+}
+
 /// A value.
 enum Value {
   /// Koopa IR value.
-  Value(koopa::ir::Value),
+  Value(IrValue),
   /// Constant integer.
   Const(i32),
 }
@@ -96,6 +208,8 @@ pub enum Error {
   SymbolNotFound,
   FailedToEval,
   InvalidArrayLen,
+  NotInLoop,
+  RetValInVoidFunc,
 }
 
 impl fmt::Display for Error {
@@ -105,6 +219,8 @@ impl fmt::Display for Error {
       Self::SymbolNotFound => write!(f, "symbol not found"),
       Self::FailedToEval => write!(f, "failed to evaluate constant"),
       Self::InvalidArrayLen => write!(f, "invalid array length"),
+      Self::NotInLoop => write!(f, "using break/continue outside of loop"),
+      Self::RetValInVoidFunc => write!(f, "returning value in void fucntion"),
     }
   }
 }
@@ -250,20 +366,38 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
       .collect::<Result<Vec<_>>>()?;
     let ret_ty = self.ty.generate(program, scopes)?;
     // create new fucntion
-    let data = FunctionData::new(self.id.clone(), params_ty, ret_ty);
+    let mut data = FunctionData::new(self.id.clone(), params_ty, ret_ty);
     // add parameters to scope
     scopes.enter();
     for (param, value) in self.params.iter().zip(data.params()) {
       scopes.new_value(&param.id, Value::Value(*value))?;
     }
+    // generate entry/end/cur block and return value
+    let entry = data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
+    let end = data.dfg_mut().new_bb().basic_block(Some("%end".into()));
+    let cur = data.dfg_mut().new_bb().basic_block(None);
+    let mut ret_val = None;
+    if matches!(self.ty, FuncType::Int) {
+      ret_val = Some(data.dfg_mut().new_value().alloc(Type::get_i32()));
+    }
     // insert function to program and scope
     let func = program.new_func(data);
     scopes.new_func(&self.id, func)?;
-    scopes.cur_func = Some(func);
+    // update function information
+    let mut info = FunctionInfo::new(func, entry, end, ret_val);
+    info.push_bb(program, entry);
+    info.push_bb(program, cur);
+    if let Some(ret_val) = &info.ret_val {
+      info.push_inst_to(program, entry, *ret_val);
+    }
+    scopes.cur_func = Some(info);
     // generate function body
     self.block.generate(program, scopes)?;
     scopes.exit();
-    scopes.cur_func = None;
+    // handle end basic block
+    let mut info = scopes.cur_func.take().unwrap();
+    info.seal_entry(program, cur);
+    info.seal_func(program);
     Ok(())
   }
 }
@@ -349,7 +483,10 @@ impl<'ast> GenerateProgram<'ast> for ExpStmt {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    if let Some(exp) = &self.exp {
+      exp.generate(program, scopes)?;
+    }
+    Ok(())
   }
 }
 
@@ -373,7 +510,15 @@ impl<'ast> GenerateProgram<'ast> for Break {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // jump to the end of loop
+    let info = &mut cur_func_mut!(scopes);
+    let (_, end) = scopes.loop_info.last().ok_or(Error::NotInLoop)?;
+    let jump = info.new_value(program).jump(*end);
+    info.push_inst(program, jump);
+    // push new basic block
+    let next = info.new_bb(program, None);
+    info.push_bb(program, next);
+    Ok(())
   }
 }
 
@@ -381,7 +526,15 @@ impl<'ast> GenerateProgram<'ast> for Continue {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // jump to the begin of loop
+    let info = &mut cur_func_mut!(scopes);
+    let (begin, _) = scopes.loop_info.last().ok_or(Error::NotInLoop)?;
+    let jump = info.new_value(program).jump(*begin);
+    info.push_inst(program, jump);
+    // push new basic block
+    let next = info.new_bb(program, None);
+    info.push_bb(program, next);
+    Ok(())
   }
 }
 
@@ -389,12 +542,30 @@ impl<'ast> GenerateProgram<'ast> for Return {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    if let Some(ret_val) = cur_func!(scopes).ret_val {
+      // generate store
+      if let Some(val) = &self.exp {
+        let value = val.generate(program, scopes)?;
+        let info = &cur_func!(scopes);
+        let store = info.new_value(program).store(value, ret_val);
+        info.push_inst(program, store);
+      }
+    } else if self.exp.is_some() {
+      return Err(Error::RetValInVoidFunc);
+    }
+    // jump to the end basic block
+    let info = &mut cur_func_mut!(scopes);
+    let jump = info.new_value(program).jump(info.end);
+    info.push_inst(program, jump);
+    // push new basic block
+    let next = info.new_bb(program, None);
+    info.push_bb(program, next);
+    Ok(())
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for Exp {
-  type Out = ();
+  type Out = IrValue;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     todo!()
