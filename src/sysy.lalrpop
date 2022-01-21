@@ -103,8 +103,8 @@ MatchedStmt: Stmt = {
   "while" "(" <cond: Exp> ")" <body: MatchedStmt> => {
     Stmt::While(Box::new(While { <> }))
   },
-  "break" ";" => Stmt::Break,
-  "continue" ";" => Stmt::Continue,
+  "break" ";" => Stmt::Break(Break),
+  "continue" ";" => Stmt::Continue(Continue),
   "return" <exp: (Exp)?> ";" => Stmt::Return(Return { <> }),
 }
 
