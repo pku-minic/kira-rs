@@ -1,5 +1,5 @@
 use crate::ast::*;
-use koopa::ir::{BinaryOp, Function, Program};
+use koopa::ir::{BinaryOp, Function, FunctionData, Program, Type};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -14,6 +14,7 @@ pub fn generate_program(comp_unit: &CompUnit) -> Result<Program> {
 struct Scopes<'ast> {
   vals: Vec<HashMap<&'ast str, Value>>,
   funcs: HashMap<&'ast str, Function>,
+  cur_func: Option<Function>,
 }
 
 impl<'ast> Scopes<'ast> {
@@ -22,12 +23,13 @@ impl<'ast> Scopes<'ast> {
     Self {
       vals: vec![HashMap::new()],
       funcs: HashMap::new(),
+      cur_func: None,
     }
   }
 
   /// Returns `true` if is currently in global scope.
   fn is_global(&self) -> bool {
-    self.vals.len() == 1
+    self.cur_func.is_none()
   }
 
   /// Inserts a new value to the current scope.
@@ -68,6 +70,16 @@ impl<'ast> Scopes<'ast> {
   fn func(&self, id: &str) -> Result<Function> {
     self.funcs.get(id).copied().ok_or(Error::SymbolNotFound)
   }
+
+  /// Enters a new scope.
+  fn enter(&mut self) {
+    self.vals.push(HashMap::new());
+  }
+
+  /// Exits from the current scope.
+  fn exit(&mut self) {
+    self.vals.pop();
+  }
 }
 
 /// A value.
@@ -75,13 +87,7 @@ enum Value {
   /// Koopa IR value.
   Value(koopa::ir::Value),
   /// Constant integer.
-  Int(i32),
-  /// Constant zeros (zeroed array).
-  /// Holds dims number of array.
-  Zeros(usize),
-  /// Constant array.
-  /// Holds dims number of array and values of array.
-  Array(usize, Vec<i32>),
+  Const(i32),
 }
 
 /// Error returned by IR generator.
@@ -89,6 +95,7 @@ pub enum Error {
   DuplicatedDef,
   SymbolNotFound,
   FailedToEval,
+  InvalidArrayLen,
 }
 
 impl fmt::Display for Error {
@@ -97,7 +104,14 @@ impl fmt::Display for Error {
       Self::DuplicatedDef => write!(f, "duplicated symbol definition"),
       Self::SymbolNotFound => write!(f, "symbol not found"),
       Self::FailedToEval => write!(f, "failed to evaluate constant"),
+      Self::InvalidArrayLen => write!(f, "invalid array length"),
     }
+  }
+}
+
+impl fmt::Debug for Error {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "{}", self)
   }
 }
 
@@ -115,6 +129,32 @@ impl<'ast> GenerateProgram<'ast> for CompUnit {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+    let mut new_decl = |name, params_ty, ret_ty| {
+      scopes
+        .new_func(
+          name,
+          program.new_func(FunctionData::new_decl(name.into(), params_ty, ret_ty)),
+        )
+        .unwrap();
+    };
+    // generate SysY library function declarations
+    new_decl("getint", vec![], Type::get_i32());
+    new_decl("getch", vec![], Type::get_i32());
+    new_decl(
+      "getarray",
+      vec![Type::get_pointer(Type::get_i32())],
+      Type::get_i32(),
+    );
+    new_decl("putint", vec![Type::get_i32()], Type::get_unit());
+    new_decl("putch", vec![Type::get_i32()], Type::get_unit());
+    new_decl(
+      "putarray",
+      vec![Type::get_i32(), Type::get_pointer(Type::get_i32())],
+      Type::get_unit(),
+    );
+    new_decl("starttime", vec![], Type::get_unit());
+    new_decl("stoptime", vec![], Type::get_unit());
+    // generate global items
     for item in &self.items {
       item.generate(program, scopes)?;
     }
@@ -175,7 +215,10 @@ impl<'ast> GenerateProgram<'ast> for VarDecl {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    for def in &self.defs {
+      def.generate(program, scopes)?;
+    }
+    Ok(())
   }
 }
 
@@ -199,23 +242,57 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    // generate parameter types and return type
+    let params_ty = self
+      .params
+      .iter()
+      .map(|p| p.generate(program, scopes))
+      .collect::<Result<Vec<_>>>()?;
+    let ret_ty = self.ty.generate(program, scopes)?;
+    // create new fucntion
+    let data = FunctionData::new(self.id.clone(), params_ty, ret_ty);
+    // add parameters to scope
+    scopes.enter();
+    for (param, value) in self.params.iter().zip(data.params()) {
+      scopes.new_value(&param.id, Value::Value(*value))?;
+    }
+    // insert function to program and scope
+    let func = program.new_func(data);
+    scopes.new_func(&self.id, func)?;
+    scopes.cur_func = Some(func);
+    // generate function body
+    self.block.generate(program, scopes)?;
+    scopes.exit();
+    scopes.cur_func = None;
+    Ok(())
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for FuncType {
-  type Out = ();
+  type Out = Type;
 
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+  fn generate(&'ast self, _: &mut Program, _: &mut Scopes<'ast>) -> Result<Self::Out> {
+    Ok(match self {
+      Self::Void => Type::get_unit(),
+      Self::Int => Type::get_i32(),
+    })
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for FuncFParam {
-  type Out = ();
+  type Out = Type;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    Ok(match &self.dims {
+      Some(dims) => Type::get_pointer(dims.iter().rev().fold(Ok(Type::get_i32()), |b, exp| {
+        let base = b?;
+        let len = exp.generate(program, scopes)?;
+        (len >= 1)
+          .then(|| Type::get_array(base, len as usize))
+          .ok_or(Error::InvalidArrayLen)
+      })?),
+      None => Type::get_i32(),
+    })
   }
 }
 
@@ -223,7 +300,12 @@ impl<'ast> GenerateProgram<'ast> for Block {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    scopes.enter();
+    for item in &self.items {
+      item.generate(program, scopes)?;
+    }
+    scopes.exit();
+    Ok(())
   }
 }
 
@@ -231,7 +313,10 @@ impl<'ast> GenerateProgram<'ast> for BlockItem {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Decl(decl) => decl.generate(program, scopes),
+      Self::Stmt(stmt) => stmt.generate(program, scopes),
+    }
   }
 }
 
@@ -239,7 +324,16 @@ impl<'ast> GenerateProgram<'ast> for Stmt {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    match self {
+      Self::Assign(s) => s.generate(program, scopes),
+      Self::ExpStmt(s) => s.generate(program, scopes),
+      Self::Block(s) => s.generate(program, scopes),
+      Self::If(s) => s.generate(program, scopes),
+      Self::While(s) => s.generate(program, scopes),
+      Self::Break(s) => s.generate(program, scopes),
+      Self::Continue(s) => s.generate(program, scopes),
+      Self::Return(s) => s.generate(program, scopes),
+    }
   }
 }
 
@@ -268,6 +362,22 @@ impl<'ast> GenerateProgram<'ast> for If {
 }
 
 impl<'ast> GenerateProgram<'ast> for While {
+  type Out = ();
+
+  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'ast> GenerateProgram<'ast> for Break {
+  type Out = ();
+
+  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'ast> GenerateProgram<'ast> for Continue {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
@@ -442,27 +552,11 @@ impl Evaluate for LVal {
     let val = scopes.value(&self.id).ok()?;
     if self.dims.is_empty() {
       match val {
-        Value::Int(i) => Some(*i),
+        Value::Const(i) => Some(*i),
         _ => None,
       }
     } else {
-      let dims = self
-        .dims
-        .iter()
-        .map(|e| e.eval(scopes))
-        .collect::<Option<Vec<_>>>()?;
-      match val {
-        Value::Zeros(len) => (dims.len() == *len).then(|| 0),
-        Value::Array(len, arr) => {
-          if dims.len() == *len {
-            let index = dims.into_iter().reduce(|l, r| l * r).unwrap();
-            arr.get(index as usize).copied()
-          } else {
-            None
-          }
-        }
-        _ => None,
-      }
+      None
     }
   }
 }
