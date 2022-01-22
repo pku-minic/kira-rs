@@ -218,12 +218,62 @@ enum Value {
 
 /// An initializer.
 enum Initializer {
+  Const(i32),
   Value(IrValue),
   List(Vec<Initializer>),
 }
 
 impl Initializer {
-  //
+  /// Reshapes the current initializer by using the given type.
+  /// Returns the reshaped initializer.
+  fn reshape(self, ty: &Type) -> Result<Initializer> {
+    todo!()
+  }
+
+  /// Converts the initializer (must be reshaped first) into a constant.
+  fn into_const(self, program: &mut Program, scopes: &Scopes) -> Result<IrValue> {
+    match self {
+      Self::Const(num) => Ok(if scopes.is_global() {
+        program.new_value().integer(num)
+      } else {
+        cur_func!(scopes).new_value(program).integer(num)
+      }),
+      Self::Value(_) => Err(Error::FailedToEval),
+      Self::List(list) => {
+        let values = list
+          .into_iter()
+          .map(|i| i.into_const(program, scopes))
+          .collect::<Result<_>>()?;
+        Ok(if scopes.is_global() {
+          program.new_value().aggregate(values)
+        } else {
+          cur_func!(scopes).new_value(program).aggregate(values)
+        })
+      }
+    }
+  }
+
+  /// Converts the initializer (must be reshaped first)
+  /// into store instructions.
+  fn into_stores(self, program: &mut Program, scopes: &Scopes, ptr: IrValue) {
+    let info = cur_func!(scopes);
+    let store = match self {
+      Self::Const(num) => {
+        let value = info.new_value(program).integer(num);
+        info.new_value(program).store(value, ptr)
+      }
+      Self::Value(value) => info.new_value(program).store(value, ptr),
+      Self::List(list) => {
+        for (i, init) in list.into_iter().enumerate() {
+          let index = info.new_value(program).integer(i as i32);
+          let ptr = info.new_value(program).get_elem_ptr(ptr, index);
+          init.into_stores(program, scopes, ptr);
+        }
+        return;
+      }
+    };
+    info.push_inst(program, store);
+  }
 }
 
 /// An expression value.
@@ -397,8 +447,28 @@ impl<'ast> GenerateProgram<'ast> for ConstDef {
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     // generate type and initializer
     let ty = self.dims.to_type(scopes)?;
-    let init = self.init.generate(program, scopes)?;
-    todo!()
+    let init = self.init.generate(program, scopes)?.reshape(&ty)?;
+    // generate constant
+    if ty.is_i32() {
+      match init {
+        Initializer::Const(num) => scopes.new_value(&self.id, Value::Const(num))?,
+        _ => unreachable!(),
+      }
+    } else {
+      let value = init.into_const(program, scopes)?;
+      let value = if scopes.is_global() {
+        program.new_value().global_alloc(value)
+      } else {
+        let info = cur_func!(scopes);
+        let alloc = info.new_alloc(program, ty);
+        let store = info.new_value(program).store(value, alloc);
+        info.push_inst(program, store);
+        alloc
+      };
+      // add to scope
+      scopes.new_value(&self.id, Value::Value(value))?;
+    }
+    Ok(())
   }
 }
 
@@ -407,10 +477,7 @@ impl<'ast> GenerateProgram<'ast> for ConstInitVal {
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     Ok(match self {
-      Self::Exp(exp) => {
-        let value = exp.generate(program, scopes)?;
-        Initializer::Value(cur_func!(scopes).new_value(program).integer(value))
-      }
+      Self::Exp(exp) => Initializer::Const(exp.generate(program, scopes)?),
       Self::List(list) => Initializer::List(
         list
           .iter()
@@ -436,9 +503,31 @@ impl<'ast> GenerateProgram<'ast> for VarDef {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    // generate type
+    // generate type and initializer
     let ty = self.dims.to_type(scopes)?;
-    todo!()
+    let init = self
+      .init
+      .as_ref()
+      .map(|i| i.generate(program, scopes)?.reshape(&ty))
+      .transpose()?;
+    // generate variable
+    let value = if scopes.is_global() {
+      let init = match init {
+        Some(init) => init.into_const(program, scopes)?,
+        None => program.new_value().zero_init(ty),
+      };
+      program.new_value().global_alloc(init)
+    } else {
+      let info = cur_func!(scopes);
+      let alloc = info.new_alloc(program, ty);
+      if let Some(init) = init {
+        init.into_stores(program, scopes, alloc);
+      }
+      alloc
+    };
+    // add to scope
+    scopes.new_value(&self.id, Value::Value(value))?;
+    Ok(())
   }
 }
 
@@ -447,12 +536,13 @@ impl<'ast> GenerateProgram<'ast> for InitVal {
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     Ok(match self {
-      Self::Exp(exp) => Initializer::Value(if scopes.is_global() {
-        let value = exp.eval(scopes).ok_or(Error::FailedToEval)?;
-        program.new_value().integer(value)
-      } else {
-        exp.generate(program, scopes)?.into_int(program, scopes)?
-      }),
+      Self::Exp(exp) => {
+        if scopes.is_global() {
+          Initializer::Const(exp.eval(scopes).ok_or(Error::FailedToEval)?)
+        } else {
+          Initializer::Value(exp.generate(program, scopes)?.into_int(program, scopes)?)
+        }
+      }
       Self::List(list) => Initializer::List(
         list
           .iter()
