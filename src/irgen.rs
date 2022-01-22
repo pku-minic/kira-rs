@@ -212,8 +212,6 @@ impl FunctionInfo {
 enum Value {
   /// Koopa IR value.
   Value(IrValue),
-  /// Function parameter.
-  Param(IrValue),
   /// Constant integer.
   Const(i32),
 }
@@ -229,6 +227,7 @@ pub enum Error {
   DerefInt,
   UseVoidValue,
   ArgMismatch,
+  NonIntCalc,
 }
 
 impl fmt::Display for Error {
@@ -243,6 +242,7 @@ impl fmt::Display for Error {
       Self::DerefInt => write!(f, "dereferencing an integer"),
       Self::UseVoidValue => write!(f, "using a void value"),
       Self::ArgMismatch => write!(f, "argument mismatch"),
+      Self::NonIntCalc => write!(f, "non-integer calculation"),
     }
   }
 }
@@ -389,18 +389,18 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
     let ret_ty = self.ty.generate(program, scopes)?;
     // create new fucntion
     let mut data = FunctionData::new(self.id.clone(), params_ty, ret_ty);
-    // add parameters to scope
-    scopes.enter();
-    for (param, value) in self.params.iter().zip(data.params()) {
-      scopes.new_value(&param.id, Value::Value(*value))?;
-    }
-    // generate entry/end/cur block and return value
+    // get parameter list
+    let params = data.params().to_owned();
+    // generate entry/end/cur block
     let entry = data.dfg_mut().new_bb().basic_block(Some("%entry".into()));
     let end = data.dfg_mut().new_bb().basic_block(Some("%end".into()));
     let cur = data.dfg_mut().new_bb().basic_block(None);
     let mut ret_val = None;
+    // generate return value
     if matches!(self.ty, FuncType::Int) {
-      ret_val = Some(data.dfg_mut().new_value().alloc(Type::get_i32()));
+      let alloc = data.dfg_mut().new_value().alloc(Type::get_i32());
+      data.dfg_mut().set_value_name(alloc, Some("%ret".into()));
+      ret_val = Some(alloc);
     }
     // insert function to program and scope
     let func = program.new_func(data);
@@ -408,9 +408,18 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
     // update function information
     let mut info = FunctionInfo::new(func, entry, end, ret_val);
     info.push_bb(program, entry);
-    info.push_bb(program, cur);
     if let Some(ret_val) = &info.ret_val {
-      info.push_inst_to(program, entry, *ret_val);
+      info.push_inst(program, *ret_val);
+    }
+    info.push_bb(program, cur);
+    // generate allocations for parameters
+    scopes.enter();
+    for (param, value) in self.params.iter().zip(params) {
+      let ty = program.func(func).dfg().value(value).ty().clone();
+      let alloc = info.new_alloc(program, ty);
+      let store = info.new_value(program).store(value, alloc);
+      info.push_inst(program, store);
+      scopes.new_value(&param.id, Value::Value(alloc))?;
     }
     scopes.cur_func = Some(info);
     // generate function body
@@ -649,9 +658,8 @@ impl<'ast> GenerateProgram<'ast> for LVal {
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     // handle constant
-    let (is_param, mut value) = match scopes.value(&self.id)? {
-      Value::Value(value) => (false, *value),
-      Value::Param(value) => (true, *value),
+    let mut value = match scopes.value(&self.id)? {
+      Value::Value(value) => *value,
       Value::Const(num) => {
         return self
           .indices
@@ -660,38 +668,59 @@ impl<'ast> GenerateProgram<'ast> for LVal {
           .ok_or(Error::DerefInt);
       }
     };
-    // handle value and parameter
-    let mut first = true;
-    let mut ty = scopes.ty(program, value);
-    for index in &self.indices {
-      // generate index
-      let index = index.generate(program, scopes)?;
-      // check if is valid
-      match ty.kind() {
-        TypeKind::Pointer(base) => match base.kind() {
-          TypeKind::Int32 if is_param && first => (),
-          TypeKind::Array(..) => (),
-          _ => return Err(Error::DerefInt),
-        },
-        _ => return Err(Error::DerefInt),
+    // check type
+    let mut is_ptr_ptr = false;
+    let mut dims = match scopes.ty(program, value).kind() {
+      TypeKind::Pointer(base) => {
+        let mut ty = base;
+        let mut dims = 0;
+        loop {
+          ty = match ty.kind() {
+            TypeKind::Array(base, _) => base,
+            TypeKind::Pointer(base) => {
+              is_ptr_ptr = true;
+              base
+            }
+            _ => break dims,
+          };
+          dims += 1;
+        }
       }
-      // generate pointer calculation
-      let info = cur_func!(scopes);
-      if is_param && first {
-        value = info.new_value(program).get_ptr(value, index);
-      } else {
-        value = info.new_value(program).get_elem_ptr(value, index);
-      }
-      // update type
-      ty = program.func(info.func).dfg().value(value).ty().clone();
-      // push to the current basic block
-      info.push_inst(program, value);
-      first = false;
-    }
-    // generate load
-    if !ty.is_i32() {
+      _ => 0,
+    };
+    // generate load for array parameter
+    if is_ptr_ptr {
       let info = cur_func!(scopes);
       value = info.new_value(program).load(value);
+      info.push_inst(program, value);
+    }
+    // handle array dereference
+    for (i, index) in self.indices.iter().enumerate() {
+      // check if dereferencing integer
+      if dims == 0 {
+        return Err(Error::DerefInt);
+      }
+      dims -= 1;
+      // generate index
+      let index = index.generate(program, scopes)?;
+      // generate pointer calculation
+      let info = cur_func!(scopes);
+      value = if is_ptr_ptr && i == 0 {
+        info.new_value(program).get_ptr(value, index)
+      } else {
+        info.new_value(program).get_elem_ptr(value, index)
+      };
+      info.push_inst(program, value);
+    }
+    // generate load, or pointer calculation for function arguments
+    if dims == 0 {
+      let info = cur_func!(scopes);
+      value = info.new_value(program).load(value);
+      info.push_inst(program, value);
+    } else if self.indices.is_empty() && !is_ptr_ptr {
+      let info = cur_func!(scopes);
+      let zero = info.new_value(program).integer(0);
+      value = info.new_value(program).get_ptr(value, zero);
       info.push_inst(program, value);
     }
     Ok(value)
@@ -710,6 +739,22 @@ impl<'ast> GenerateProgram<'ast> for PrimaryExp {
   }
 }
 
+/// Checking if the type of an `IrValue` is integer.
+macro_rules! expect_int {
+  ($program:expr, $scopes:expr, $value:expr) => {
+    if !$value.is_global()
+      && !$program
+        .func(cur_func!($scopes).func)
+        .dfg()
+        .value($value)
+        .ty()
+        .is_i32()
+    {
+      return Err(Error::NonIntCalc);
+    }
+  };
+}
+
 impl<'ast> GenerateProgram<'ast> for UnaryExp {
   type Out = Option<IrValue>;
 
@@ -719,6 +764,7 @@ impl<'ast> GenerateProgram<'ast> for UnaryExp {
       Self::Call(call) => call.generate(program, scopes),
       Self::Unary(op, exp) => {
         let exp = exp.generate(program, scopes)?.ok_or(Error::UseVoidValue)?;
+        expect_int!(program, scopes, exp);
         let info = cur_func!(scopes);
         let zero = info.new_value(program).integer(0);
         let value = match op {
@@ -776,6 +822,7 @@ impl<'ast> GenerateProgram<'ast> for MulExp {
       Self::MulUnary(lhs, op, rhs) => {
         let lhs = lhs.generate(program, scopes)?;
         let rhs = rhs.generate(program, scopes)?.ok_or(Error::UseVoidValue)?;
+        expect_int!(program, scopes, rhs);
         let op = op.generate(program, scopes)?;
         let info = cur_func!(scopes);
         let value = info.new_value(program).binary(op, lhs, rhs);
@@ -795,6 +842,7 @@ impl<'ast> GenerateProgram<'ast> for AddExp {
       Self::AddMul(lhs, op, rhs) => {
         let lhs = lhs.generate(program, scopes)?;
         let rhs = rhs.generate(program, scopes)?;
+        expect_int!(program, scopes, rhs);
         let op = op.generate(program, scopes)?;
         let info = cur_func!(scopes);
         let value = info.new_value(program).binary(op, lhs, rhs);
@@ -814,6 +862,7 @@ impl<'ast> GenerateProgram<'ast> for RelExp {
       Self::RelAdd(lhs, op, rhs) => {
         let lhs = lhs.generate(program, scopes)?;
         let rhs = rhs.generate(program, scopes)?;
+        expect_int!(program, scopes, rhs);
         let op = op.generate(program, scopes)?;
         let info = cur_func!(scopes);
         let value = info.new_value(program).binary(op, lhs, rhs);
@@ -833,6 +882,7 @@ impl<'ast> GenerateProgram<'ast> for EqExp {
       Self::EqRel(lhs, op, rhs) => {
         let lhs = lhs.generate(program, scopes)?;
         let rhs = rhs.generate(program, scopes)?;
+        expect_int!(program, scopes, rhs);
         let op = op.generate(program, scopes)?;
         let info = cur_func!(scopes);
         let value = info.new_value(program).binary(op, lhs, rhs);
@@ -866,6 +916,7 @@ macro_rules! generate_logical_ops {
     // generate right-hand side expression
     info.push_bb($program, $rhs_bb);
     let rhs = $rhs.generate($program, $scopes)?;
+    expect_int!($program, $scopes, rhs);
     let info = cur_func_mut!($scopes);
     let rhs = info.new_value($program).binary(BinaryOp::NotEq, rhs, zero);
     let store = info.new_value($program).store(rhs, result);
