@@ -216,7 +216,17 @@ enum Value {
   Const(i32),
 }
 
-/// A expression value.
+/// An initializer.
+enum Initializer {
+  Value(IrValue),
+  List(Vec<Initializer>),
+}
+
+impl Initializer {
+  //
+}
+
+/// An expression value.
 enum ExpValue {
   /// An `void`.
   Void,
@@ -385,15 +395,29 @@ impl<'ast> GenerateProgram<'ast> for ConstDef {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+    // generate type and initializer
+    let ty = self.dims.to_type(scopes)?;
+    let init = self.init.generate(program, scopes)?;
     todo!()
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for ConstInitVal {
-  type Out = ();
+  type Out = Initializer;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    Ok(match self {
+      Self::Exp(exp) => {
+        let value = exp.generate(program, scopes)?;
+        Initializer::Value(cur_func!(scopes).new_value(program).integer(value))
+      }
+      Self::List(list) => Initializer::List(
+        list
+          .iter()
+          .map(|v| v.generate(program, scopes))
+          .collect::<Result<_>>()?,
+      ),
+    })
   }
 }
 
@@ -412,15 +436,30 @@ impl<'ast> GenerateProgram<'ast> for VarDef {
   type Out = ();
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+    // generate type
+    let ty = self.dims.to_type(scopes)?;
     todo!()
   }
 }
 
 impl<'ast> GenerateProgram<'ast> for InitVal {
-  type Out = ();
+  type Out = Initializer;
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    todo!()
+    Ok(match self {
+      Self::Exp(exp) => Initializer::Value(if scopes.is_global() {
+        let value = exp.eval(scopes).ok_or(Error::FailedToEval)?;
+        program.new_value().integer(value)
+      } else {
+        exp.generate(program, scopes)?.into_int(program, scopes)?
+      }),
+      Self::List(list) => Initializer::List(
+        list
+          .iter()
+          .map(|v| v.generate(program, scopes))
+          .collect::<Result<_>>()?,
+      ),
+    })
   }
 }
 
@@ -495,15 +534,9 @@ impl<'ast> GenerateProgram<'ast> for FuncType {
 impl<'ast> GenerateProgram<'ast> for FuncFParam {
   type Out = Type;
 
-  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+  fn generate(&'ast self, _: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     Ok(match &self.dims {
-      Some(dims) => Type::get_pointer(dims.iter().rev().fold(Ok(Type::get_i32()), |b, exp| {
-        let base = b?;
-        let len = exp.generate(program, scopes)?;
-        (len >= 1)
-          .then(|| Type::get_array(base, len as usize))
-          .ok_or(Error::InvalidArrayLen)
-      })?),
+      Some(dims) => Type::get_pointer(dims.to_type(scopes)?),
       None => Type::get_i32(),
     })
   }
@@ -1204,5 +1237,22 @@ impl Evaluate for LOrExp {
 impl Evaluate for ConstExp {
   fn eval(&self, scopes: &Scopes) -> Option<i32> {
     self.exp.eval(scopes)
+  }
+}
+
+/// Helper trait for converting dimentions to type.
+trait DimsToType {
+  fn to_type(&self, scopes: &Scopes) -> Result<Type>;
+}
+
+impl DimsToType for Vec<ConstExp> {
+  fn to_type(&self, scopes: &Scopes) -> Result<Type> {
+    self.iter().rev().fold(Ok(Type::get_i32()), |b, exp| {
+      let base = b?;
+      let len = exp.eval(scopes).ok_or(Error::FailedToEval)?;
+      (len >= 1)
+        .then(|| Type::get_array(base, len as usize))
+        .ok_or(Error::InvalidArrayLen)
+    })
   }
 }
