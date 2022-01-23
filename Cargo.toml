@@ -1,5 +1,5 @@
 [package]
-name = "kira-rs"
+name = "kira"
 version = "0.0.1"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2021"
