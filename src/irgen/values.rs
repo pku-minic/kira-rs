@@ -25,17 +25,27 @@ impl Initializer {
   /// Returns the reshaped initializer.
   pub fn reshape(self, mut ty: &Type) -> Result<Self> {
     // get length list
+    // array `int a[2][3][4]` yields [(4, 4), (3, 12), (2, 24)]
     let mut lens = Vec::new();
     loop {
       match ty.kind() {
         TypeKind::Int32 => break,
         TypeKind::Array(base, len) => {
-          lens.push(lens.last().copied().unwrap_or(1) * len);
+          lens.push(*len);
           ty = base;
         }
         _ => unreachable!(),
       }
     }
+    let mut last_len = 1;
+    let lens: Vec<_> = lens
+      .into_iter()
+      .rev()
+      .map(|l| {
+        last_len *= l;
+        (l, last_len)
+      })
+      .collect();
     // perform reshape
     match self {
       v @ (Self::Const(_) | Self::Value(_)) if lens.is_empty() => Ok(v),
@@ -44,48 +54,49 @@ impl Initializer {
     }
   }
 
-  fn reshape_impl(inits: Vec<Self>, lens: &[usize]) -> Result<Self> {
+  fn reshape_impl(inits: Vec<Self>, lens: &[(usize, usize)]) -> Result<Self> {
     let mut reshaped: Vec<Vec<Self>> = repeat_with(Vec::new).take(lens.len() + 1).collect();
     let mut len = 0;
     // handle initializer elements
     for init in inits {
       // too many elements
-      if len >= *lens.last().unwrap() {
+      if len >= lens.last().unwrap().1 {
         return Err(Error::InvalidInit);
       }
       match init {
         Self::List(list) => {
           // get the next-level length list
-          let lens = match reshaped.iter().position(|v| !v.is_empty()) {
+          let next_lens = match reshaped.iter().position(|v| !v.is_empty()) {
             // not aligned
             Some(0) => return Err(Error::InvalidInit),
             Some(i) => &lens[..i],
             None => &lens[..lens.len() - 1],
           };
           // reshape, and add to reshaped initializer list
-          reshaped[lens.len()].push(Self::reshape_impl(list, lens)?);
-          len += lens.last().unwrap();
+          reshaped[next_lens.len()].push(Self::reshape_impl(list, next_lens)?);
+          Self::carry(&mut reshaped, lens);
+          len += next_lens.last().unwrap().1;
         }
         _ => {
           // just push
-          Self::push_to(&mut reshaped, lens, init);
+          reshaped[0].push(init);
+          Self::carry(&mut reshaped, lens);
           len += 1;
         }
       }
     }
     // fill zeros
-    while len < *lens.last().unwrap() {
-      Self::push_to(&mut reshaped, lens, Self::Const(0));
+    while len < lens.last().unwrap().1 {
+      reshaped[0].push(Self::Const(0));
+      Self::carry(&mut reshaped, lens);
       len += 1;
     }
     Ok(reshaped.pop().unwrap().pop().unwrap())
   }
 
-  fn push_to(reshaped: &mut Vec<Vec<Self>>, lens: &[usize], init: Self) {
-    // push to the lowest dimension
-    reshaped[0].push(init);
+  fn carry(reshaped: &mut Vec<Vec<Self>>, lens: &[(usize, usize)]) {
     // perform carry
-    for (i, &len) in lens.iter().enumerate() {
+    for (i, &(len, _)) in lens.iter().enumerate() {
       if reshaped[i].len() == len {
         let init = Self::List(reshaped[i].drain(..).collect());
         reshaped[i + 1].push(init);
