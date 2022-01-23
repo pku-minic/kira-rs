@@ -68,6 +68,7 @@ pub enum BlockItem {
   Stmt(Stmt),
 }
 
+#[allow(clippy::enum_variant_names)]
 pub enum Stmt {
   Assign(Assign),
   ExpStmt(ExpStmt),

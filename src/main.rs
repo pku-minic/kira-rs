@@ -8,7 +8,7 @@ use std::fs::read_to_string;
 use std::process::exit;
 use std::{fmt, io};
 
-lalrpop_mod!(sysy);
+lalrpop_mod!(#[allow(clippy::all)] sysy);
 
 fn main() {
   if let Err(err) = try_main() {

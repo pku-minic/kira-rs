@@ -45,7 +45,7 @@ impl Initializer {
   }
 
   fn reshape_impl(inits: Vec<Self>, lens: &[usize]) -> Result<Self> {
-    let mut reshaped: Vec<Vec<Self>> = repeat_with(|| Vec::new()).take(lens.len() + 1).collect();
+    let mut reshaped: Vec<Vec<Self>> = repeat_with(Vec::new).take(lens.len() + 1).collect();
     let mut len = 0;
     // handle initializer elements
     for init in inits {
