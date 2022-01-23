@@ -27,22 +27,22 @@ impl<'ast> GenerateProgram<'ast> for CompUnit {
         .unwrap();
     };
     // generate SysY library function declarations
-    new_decl("getint", vec![], Type::get_i32());
-    new_decl("getch", vec![], Type::get_i32());
+    new_decl("@getint", vec![], Type::get_i32());
+    new_decl("@getch", vec![], Type::get_i32());
     new_decl(
-      "getarray",
+      "@getarray",
       vec![Type::get_pointer(Type::get_i32())],
       Type::get_i32(),
     );
-    new_decl("putint", vec![Type::get_i32()], Type::get_unit());
-    new_decl("putch", vec![Type::get_i32()], Type::get_unit());
+    new_decl("@putint", vec![Type::get_i32()], Type::get_unit());
+    new_decl("@putch", vec![Type::get_i32()], Type::get_unit());
     new_decl(
-      "putarray",
+      "@putarray",
       vec![Type::get_i32(), Type::get_pointer(Type::get_i32())],
       Type::get_unit(),
     );
-    new_decl("starttime", vec![], Type::get_unit());
-    new_decl("stoptime", vec![], Type::get_unit());
+    new_decl("@starttime", vec![], Type::get_unit());
+    new_decl("@stoptime", vec![], Type::get_unit());
     // generate global items
     for item in &self.items {
       item.generate(program, scopes)?;
@@ -103,7 +103,7 @@ impl<'ast> GenerateProgram<'ast> for ConstDef {
         program.new_value().global_alloc(value)
       } else {
         let info = cur_func!(scopes);
-        let alloc = info.new_alloc(program, ty);
+        let alloc = info.new_alloc(program, ty, Some(&self.id));
         let store = info.new_value(program).store(value, alloc);
         info.push_inst(program, store);
         alloc
@@ -162,7 +162,7 @@ impl<'ast> GenerateProgram<'ast> for VarDef {
       program.new_value().global_alloc(init)
     } else {
       let info = cur_func!(scopes);
-      let alloc = info.new_alloc(program, ty);
+      let alloc = info.new_alloc(program, ty, Some(&self.id));
       if let Some(init) = init {
         init.into_stores(program, scopes, alloc);
       }
@@ -208,7 +208,7 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
       .collect::<Result<Vec<_>>>()?;
     let ret_ty = self.ty.generate(program, scopes)?;
     // create new fucntion
-    let mut data = FunctionData::new(self.id.clone(), params_ty, ret_ty);
+    let mut data = FunctionData::new(format!("@{}", self.id), params_ty, ret_ty);
     // get parameter list
     let params = data.params().to_owned();
     // generate entry/end/cur block
@@ -236,7 +236,7 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
     scopes.enter();
     for (param, value) in self.params.iter().zip(params) {
       let ty = program.func(func).dfg().value(value).ty().clone();
-      let alloc = info.new_alloc(program, ty);
+      let alloc = info.new_alloc(program, ty, Some(&param.id));
       let store = info.new_value(program).store(value, alloc);
       info.push_inst(program, store);
       scopes.new_value(&param.id, Value::Value(alloc))?;
@@ -716,7 +716,7 @@ macro_rules! generate_logical_ops {
     $prefix:literal, $rhs_bb:ident, $end_bb:ident, $tbb:ident, $fbb:ident
   ) => {{
     // generate result
-    let result = cur_func!($scopes).new_alloc($program, Type::get_i32());
+    let result = cur_func!($scopes).new_alloc($program, Type::get_i32(), None);
     // generate left-hand side expression
     let lhs = $lhs
       .generate($program, $scopes)?
