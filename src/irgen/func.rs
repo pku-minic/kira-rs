@@ -81,8 +81,14 @@ impl FunctionInfo {
   }
 
   /// Creates a new allocation and inserts to the entry block.
-  pub fn new_alloc(&self, program: &mut Program, ty: Type) -> Value {
+  pub fn new_alloc(&self, program: &mut Program, ty: Type, name: Option<&str>) -> Value {
     let alloc = self.new_value(program).alloc(ty);
+    if let Some(name) = name {
+      program
+        .func_mut(self.func)
+        .dfg_mut()
+        .set_value_name(alloc, Some(format!("@{}", name)));
+    }
     self.push_inst_to(program, self.entry, alloc);
     alloc
   }
