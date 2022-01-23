@@ -3,6 +3,7 @@ use super::{Error, Result};
 use koopa::ir::builder_traits::*;
 use koopa::ir::Value as IrValue;
 use koopa::ir::{Program, Type, TypeKind};
+use std::iter::repeat_with;
 
 /// A value.
 pub enum Value {
@@ -44,31 +45,52 @@ impl Initializer {
   }
 
   fn reshape_impl(inits: Vec<Self>, lens: &[usize]) -> Result<Self> {
-    let mut reshaped = lens.iter().map(|_| Vec::new()).collect();
+    let mut reshaped: Vec<Vec<Self>> = repeat_with(|| Vec::new()).take(lens.len() + 1).collect();
     let mut len = 0;
     // handle initializer elements
     for init in inits {
+      // too many elements
+      if len >= *lens.last().unwrap() {
+        return Err(Error::InvalidInit);
+      }
       match init {
         Self::List(list) => {
-          //
-          todo!()
+          // get the next-level length list
+          let lens = match reshaped.iter().position(|v| !v.is_empty()) {
+            // not aligned
+            Some(0) => return Err(Error::InvalidInit),
+            Some(i) => &lens[..i],
+            None => &lens[..lens.len() - 1],
+          };
+          // reshape, and add to reshaped initializer list
+          reshaped[lens.len()].push(Self::reshape_impl(list, lens)?);
+          len += lens.last().unwrap();
         }
         _ => {
+          // just push
           Self::push_to(&mut reshaped, lens, init);
           len += 1;
         }
       }
     }
     // fill zeros
-    while len < *lens.first().unwrap() {
+    while len < *lens.last().unwrap() {
       Self::push_to(&mut reshaped, lens, Self::Const(0));
       len += 1;
     }
-    Ok(Self::List(reshaped.pop().unwrap()))
+    Ok(reshaped.pop().unwrap().pop().unwrap())
   }
 
   fn push_to(reshaped: &mut Vec<Vec<Self>>, lens: &[usize], init: Self) {
-    todo!()
+    // push to the lowest dimension
+    reshaped[0].push(init);
+    // perform carry
+    for (i, &len) in lens.iter().enumerate() {
+      if reshaped[i].len() == len {
+        let init = Self::List(reshaped[i].drain(..).collect());
+        reshaped[i + 1].push(init);
+      }
+    }
   }
 
   /// Converts the initializer (must be reshaped first) into a constant.
