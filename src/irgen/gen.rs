@@ -22,27 +22,31 @@ impl<'ast> GenerateProgram<'ast> for CompUnit {
       scopes
         .new_func(
           name,
-          program.new_func(FunctionData::new_decl(name.into(), params_ty, ret_ty)),
+          program.new_func(FunctionData::new_decl(
+            format!("@{}", name),
+            params_ty,
+            ret_ty,
+          )),
         )
         .unwrap();
     };
     // generate SysY library function declarations
-    new_decl("@getint", vec![], Type::get_i32());
-    new_decl("@getch", vec![], Type::get_i32());
+    new_decl("getint", vec![], Type::get_i32());
+    new_decl("getch", vec![], Type::get_i32());
     new_decl(
-      "@getarray",
+      "getarray",
       vec![Type::get_pointer(Type::get_i32())],
       Type::get_i32(),
     );
-    new_decl("@putint", vec![Type::get_i32()], Type::get_unit());
-    new_decl("@putch", vec![Type::get_i32()], Type::get_unit());
+    new_decl("putint", vec![Type::get_i32()], Type::get_unit());
+    new_decl("putch", vec![Type::get_i32()], Type::get_unit());
     new_decl(
-      "@putarray",
+      "putarray",
       vec![Type::get_i32(), Type::get_pointer(Type::get_i32())],
       Type::get_unit(),
     );
-    new_decl("@starttime", vec![], Type::get_unit());
-    new_decl("@stoptime", vec![], Type::get_unit());
+    new_decl("starttime", vec![], Type::get_unit());
+    new_decl("stoptime", vec![], Type::get_unit());
     // generate global items
     for item in &self.items {
       item.generate(program, scopes)?;
@@ -550,7 +554,7 @@ impl<'ast> GenerateProgram<'ast> for LVal {
       if self.indices.is_empty() && !is_ptr_ptr {
         let info = cur_func!(scopes);
         let zero = info.new_value(program).integer(0);
-        value = info.new_value(program).get_ptr(value, zero);
+        value = info.new_value(program).get_elem_ptr(value, zero);
         info.push_inst(program, value);
       }
       Ok(ExpValue::ArrPtr(value))
@@ -724,6 +728,7 @@ macro_rules! generate_logical_ops {
     let info = cur_func_mut!($scopes);
     let zero = info.new_value($program).integer(0);
     let lhs = info.new_value($program).binary(BinaryOp::NotEq, lhs, zero);
+    info.push_inst($program, lhs);
     let store = info.new_value($program).store(lhs, result);
     info.push_inst($program, store);
     // generate basic blocks and branch
@@ -738,6 +743,7 @@ macro_rules! generate_logical_ops {
       .into_int($program, $scopes)?;
     let info = cur_func_mut!($scopes);
     let rhs = info.new_value($program).binary(BinaryOp::NotEq, rhs, zero);
+    info.push_inst($program, rhs);
     let store = info.new_value($program).store(rhs, result);
     info.push_inst($program, store);
     // generate jump
