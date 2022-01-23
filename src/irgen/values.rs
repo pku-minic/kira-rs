@@ -2,7 +2,7 @@ use super::scopes::{cur_func, Scopes};
 use super::{Error, Result};
 use koopa::ir::builder_traits::*;
 use koopa::ir::Value as IrValue;
-use koopa::ir::{Program, Type};
+use koopa::ir::{Program, Type, TypeKind};
 
 /// A value.
 pub enum Value {
@@ -22,7 +22,52 @@ pub enum Initializer {
 impl Initializer {
   /// Reshapes the current initializer by using the given type.
   /// Returns the reshaped initializer.
-  pub fn reshape(self, ty: &Type) -> Result<Initializer> {
+  pub fn reshape(self, mut ty: &Type) -> Result<Self> {
+    // get length list
+    let mut lens = Vec::new();
+    loop {
+      match ty.kind() {
+        TypeKind::Int32 => break,
+        TypeKind::Array(base, len) => {
+          lens.push(lens.last().copied().unwrap_or(1) * len);
+          ty = base;
+        }
+        _ => unreachable!(),
+      }
+    }
+    // perform reshape
+    match self {
+      v @ (Self::Const(_) | Self::Value(_)) if lens.is_empty() => Ok(v),
+      Self::List(l) if !lens.is_empty() => Self::reshape_impl(l, &lens),
+      _ => Err(Error::InvalidInit),
+    }
+  }
+
+  fn reshape_impl(inits: Vec<Self>, lens: &[usize]) -> Result<Self> {
+    let mut reshaped = lens.iter().map(|_| Vec::new()).collect();
+    let mut len = 0;
+    // handle initializer elements
+    for init in inits {
+      match init {
+        Self::List(list) => {
+          //
+          todo!()
+        }
+        _ => {
+          Self::push_to(&mut reshaped, lens, init);
+          len += 1;
+        }
+      }
+    }
+    // fill zeros
+    while len < *lens.first().unwrap() {
+      Self::push_to(&mut reshaped, lens, Self::Const(0));
+      len += 1;
+    }
+    Ok(Self::List(reshaped.pop().unwrap()))
+  }
+
+  fn push_to(reshaped: &mut Vec<Vec<Self>>, lens: &[usize], init: Self) {
     todo!()
   }
 
