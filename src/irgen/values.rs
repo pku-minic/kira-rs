@@ -141,6 +141,7 @@ impl Initializer {
         for (i, init) in list.into_iter().enumerate() {
           let index = info.new_value(program).integer(i as i32);
           let ptr = info.new_value(program).get_elem_ptr(ptr, index);
+          info.push_inst(program, ptr);
           init.into_stores(program, scopes, ptr);
         }
         return;
