@@ -10,12 +10,12 @@ pub enum Value {
   /// Koopa IR value.
   Value(IrValue),
   /// Constant integer.
-  Const(i32),
+  Const(i64),
 }
 
 /// An initializer.
 pub enum Initializer {
-  Const(i32),
+  Const(i64),
   Value(IrValue),
   List(Vec<Initializer>),
 }
@@ -108,9 +108,9 @@ impl Initializer {
   pub fn into_const(self, program: &mut Program, scopes: &Scopes) -> Result<IrValue> {
     match self {
       Self::Const(num) => Ok(if scopes.is_global() {
-        program.new_value().integer(num)
+        program.new_value().integer(num as i32)
       } else {
-        cur_func!(scopes).new_value(program).integer(num)
+        cur_func!(scopes).new_value(program).integer(num as i32)
       }),
       Self::Value(_) => Err(Error::FailedToEval),
       Self::List(list) => {
@@ -133,7 +133,7 @@ impl Initializer {
     let info = cur_func!(scopes);
     let store = match self {
       Self::Const(num) => {
-        let value = info.new_value(program).integer(num);
+        let value = info.new_value(program).integer(num as i32);
         info.new_value(program).store(value, ptr)
       }
       Self::Value(value) => info.new_value(program).store(value, ptr),

@@ -496,7 +496,7 @@ impl<'ast> GenerateProgram<'ast> for LVal {
       Value::Value(value) => *value,
       Value::Const(num) => {
         return if self.indices.is_empty() {
-          let value = cur_func!(scopes).new_value(program).integer(*num);
+          let value = cur_func!(scopes).new_value(program).integer(*num as i32);
           Ok(ExpValue::Int(value))
         } else {
           Err(Error::DerefInt)
@@ -570,7 +570,7 @@ impl<'ast> GenerateProgram<'ast> for PrimaryExp {
       Self::Exp(exp) => exp.generate(program, scopes),
       Self::LVal(lval) => lval.generate(program, scopes),
       Self::Number(num) => Ok(ExpValue::Int(
-        cur_func!(scopes).new_value(program).integer(*num),
+        cur_func!(scopes).new_value(program).integer(*num as i32),
       )),
     }
   }
@@ -784,7 +784,7 @@ impl<'ast> GenerateProgram<'ast> for LOrExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for ConstExp {
-  type Out = i32;
+  type Out = i64;
 
   fn generate(&'ast self, _: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     self.eval(scopes).ok_or(Error::FailedToEval)
