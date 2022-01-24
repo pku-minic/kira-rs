@@ -2,6 +2,13 @@ use crate::ast::*;
 
 grammar;
 
+match {
+  r"\s*" => {},
+  r"//[^\n\r]*[\n\r]*" => {},
+  r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => {},
+  _
+}
+
 pub CompUnit: CompUnit = <items: (GlobalItem)*> => CompUnit { <> };
 
 GlobalItem: GlobalItem = {
@@ -191,7 +198,7 @@ Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 Number: i32 = {
   r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
   r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
-  r"0(x|X)[0-9a-fA-F][0-9a-fA-F]*" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+  r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
 }
 
 UnaryOp: UnaryOp = {
