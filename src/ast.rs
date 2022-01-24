@@ -120,7 +120,7 @@ pub struct LVal {
 pub enum PrimaryExp {
   Exp(Box<Exp>),
   LVal(LVal),
-  Number(i32),
+  Number(i64),
 }
 
 pub enum UnaryExp {
