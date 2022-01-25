@@ -1,4 +1,5 @@
 mod ast;
+mod codegen;
 mod irgen;
 
 use koopa::back::KoopaGenerator;
@@ -8,7 +9,10 @@ use std::fs::read_to_string;
 use std::process::exit;
 use std::{fmt, io};
 
-lalrpop_mod!(#[allow(clippy::all)] sysy);
+lalrpop_mod! {
+  #[allow(clippy::all)]
+  sysy
+}
 
 fn main() {
   if let Err(err) = try_main() {
@@ -37,7 +41,8 @@ fn try_main() -> Result<(), Error> {
       .generate_on(&program)
       .map_err(Error::Io);
   }
-  todo!()
+  // generate RISC-V assembly
+  codegen::generate_asm(&program, &output).map_err(Error::Io)
 }
 
 /// Error returned by `main` procedure.
@@ -52,12 +57,15 @@ enum Error {
 impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      Self::InvalidArgs => write!(f, r#"Usage: kira MODE INPUT -o OUTPUT
+      Self::InvalidArgs => write!(
+        f,
+        r#"Usage: kira MODE INPUT -o OUTPUT
 
 Options:
   MODE:   can be `-koopa`, `-riscv` or `-perf`
   INPUT:  the input SysY source file
-  OUTPUT: the output file"#),
+  OUTPUT: the output file"#
+      ),
       Self::File(err) => write!(f, "invalid input SysY file: {}", err),
       Self::Parse => write!(f, "error occurred while parsing"),
       Self::Generate(err) => write!(f, "{}", err),
