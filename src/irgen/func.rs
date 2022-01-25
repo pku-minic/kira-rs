@@ -84,10 +84,10 @@ impl FunctionInfo {
   pub fn new_alloc(&self, program: &mut Program, ty: Type, name: Option<&str>) -> Value {
     let alloc = self.new_value(program).alloc(ty);
     if let Some(name) = name {
-      let name = if name.len() < 20 {
+      let name = if name.len() <= 512 {
         format!("@{}", name)
       } else {
-        format!("@{}", &name[..20])
+        format!("@{}", &name[..512])
       };
       program
         .func_mut(self.func)
