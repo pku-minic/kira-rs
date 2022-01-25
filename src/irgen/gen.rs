@@ -104,7 +104,9 @@ impl<'ast> GenerateProgram<'ast> for ConstDef {
     } else {
       let value = init.into_const(program, scopes)?;
       let value = if scopes.is_global() {
-        program.new_value().global_alloc(value)
+        let value = program.new_value().global_alloc(value);
+        program.set_value_name(value, Some(format!("@{}", self.id)));
+        value
       } else {
         let info = cur_func!(scopes);
         let alloc = info.new_alloc(program, ty, Some(&self.id));
@@ -163,7 +165,9 @@ impl<'ast> GenerateProgram<'ast> for VarDef {
         Some(init) => init.into_const(program, scopes)?,
         None => program.new_value().zero_init(ty),
       };
-      program.new_value().global_alloc(init)
+      let value = program.new_value().global_alloc(init);
+      program.set_value_name(value, Some(format!("@{}", self.id)));
+      value
     } else {
       let info = cur_func!(scopes);
       let alloc = info.new_alloc(program, ty, Some(&self.id));
