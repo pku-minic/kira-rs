@@ -1,8 +1,13 @@
-use koopa::ir::entities::{BasicBlockData, ValueData};
-use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value};
+mod builder;
+mod func;
+
+use builder::AsmBuilder;
+use func::FunctionInfo;
+use koopa::ir::entities::ValueData;
+use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value, ValueKind};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Result;
+use std::io::{Result, Write};
 
 /// Generates the given Koopa IR program to RISC-V assembly.
 pub fn generate_asm(program: &Program, path: &str) -> Result<()> {
@@ -49,34 +54,11 @@ impl<'p> ProgramInfo<'p> {
   }
 }
 
-/// Function information.
-struct FunctionInfo {
-  slot_size: usize,
-  values: HashMap<Value, usize>,
-  bbs: HashMap<BasicBlock, String>,
-}
-
-impl FunctionInfo {
-  /// Creates a new function information.
-  fn new() -> Self {
-    Self {
-      slot_size: 0,
-      values: HashMap::new(),
-      bbs: HashMap::new(),
-    }
-  }
-
-  /// Creates a new slot for the given allocation.
-  fn new_slot(&mut self, alloc: Value, ty: &Type) {
-    self.values.insert(alloc, self.slot_size);
-    self.slot_size += ty.size();
-  }
-}
-
 /// A global/local value.
 enum AsmValue<'i> {
   Global(&'i str),
   Local(usize),
+  Temp,
 }
 
 /// Trait for generating RISC-V assembly.
@@ -117,10 +99,55 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for FunctionData {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    // get entry basic block
+    let entry_bb = match self.layout().entry_bb() {
+      Some(bb) => bb,
+      // skip declarations
+      None => return Ok(()),
+    };
+    // create function information
+    let mut is_leaf = true;
+    let mut max_arg_num = 0;
+    for value in self.dfg().values().values() {
+      match value.kind() {
+        ValueKind::Call(call) => {
+          is_leaf = false;
+          if call.args().len() > max_arg_num {
+            max_arg_num = call.args().len();
+          }
+        }
+        _ => {}
+      }
+    }
+    let mut func = FunctionInfo::new(is_leaf, max_arg_num);
+    // generate allocations in entry basic block
+    for &inst in self.layout().bbs()[&entry_bb].insts().keys() {
+      let data = self.dfg().value(inst);
+      match data.kind() {
+        ValueKind::Alloc(_) => func.new_alloc(inst, data.ty()),
+        _ => {}
+      }
+    }
+    // generate basic block names
+    for (&bb, data) in self.dfg().bbs() {
+      // basic block parameters are not supported
+      assert!(data.params().is_empty());
+      func.log_bb_name(bb, data.name());
+    }
+    // generate prologue
+    AsmBuilder::new(f, "t0").prologue(self.name(), &func)?;
     // update function information
-    let func = FunctionInfo::new();
-    // generate basic blocks
-    todo!()
+    info.cur_func = Some(func);
+    // generate instructions in basic blocks
+    for (bb, node) in self.layout().bbs() {
+      let name = bb.generate(f, info)?;
+      writeln!(f, "{name}:")?;
+      for &inst in node.insts().keys() {
+        self.dfg().value(inst).generate(f, info)?;
+      }
+    }
+    // generate epilogue
+    AsmBuilder::new(f, "t0").epilogue(&info.cur_func.take().unwrap())
   }
 }
 
@@ -128,15 +155,7 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for BasicBlock {
   type Out = &'i str;
 
   fn generate(&self, _: &mut File, info: &'i mut ProgramInfo) -> Result<Self::Out> {
-    Ok(cur_func!(info).bbs.get(self).as_ref().unwrap())
-  }
-}
-
-impl<'p, 'i> GenerateAsm<'p, 'i> for BasicBlockData {
-  type Out = ();
-
-  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    todo!()
+    Ok(cur_func!(info).bb_name(*self))
   }
 }
 
@@ -157,7 +176,10 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for Value {
         },
       )))
     } else {
-      Ok(AsmValue::Local(*cur_func!(info).values.get(self).unwrap()))
+      Ok(match cur_func!(info).size_of(*self) {
+        Some(slot) => AsmValue::Local(slot),
+        None => AsmValue::Temp,
+      })
     }
   }
 }
