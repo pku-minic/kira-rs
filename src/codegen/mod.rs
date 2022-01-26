@@ -4,6 +4,7 @@ mod func;
 use builder::AsmBuilder;
 use func::FunctionInfo;
 use koopa::ir::entities::ValueData;
+use koopa::ir::values::*;
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, Value, ValueKind};
 use std::collections::HashMap;
 use std::fs::File;
@@ -19,7 +20,6 @@ pub fn generate_asm(program: &Program, path: &str) -> Result<()> {
 struct ProgramInfo<'p> {
   program: &'p Program,
   values: HashMap<Value, String>,
-  funcs: HashMap<Function, &'p str>,
   cur_func: Option<FunctionInfo>,
 }
 
@@ -43,7 +43,6 @@ impl<'p> ProgramInfo<'p> {
     Self {
       program,
       values: HashMap::new(),
-      funcs: HashMap::new(),
       cur_func: None,
     }
   }
@@ -58,7 +57,7 @@ impl<'p> ProgramInfo<'p> {
 enum AsmValue<'i> {
   Global(&'i str),
   Local(usize),
-  Temp,
+  Const(i32),
 }
 
 /// Trait for generating RISC-V assembly.
@@ -72,11 +71,12 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for Program {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    for value in self.inst_layout() {
-      self.borrow_value(*value).generate(f, info)?;
+    for &value in self.inst_layout() {
+      self.borrow_value(value).generate(f, info)?;
     }
-    for func in self.func_layout() {
-      self.func(*func).generate(f, info)?;
+    for &func in self.func_layout() {
+      info.cur_func = Some(FunctionInfo::new(func));
+      self.func(func).generate(f, info)?;
     }
     Ok(())
   }
@@ -86,12 +86,7 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for Function {
   type Out = &'p str;
 
   fn generate(&self, _: &mut File, info: &mut ProgramInfo<'p>) -> Result<Self::Out> {
-    Ok(
-      info
-        .funcs
-        .entry(*self)
-        .or_insert_with(|| info.program.func(*self).name()),
-    )
+    Ok(info.program.func(*self).name())
   }
 }
 
@@ -99,33 +94,22 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for FunctionData {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    // get entry basic block
-    let entry_bb = match self.layout().entry_bb() {
-      Some(bb) => bb,
-      // skip declarations
-      None => return Ok(()),
-    };
-    // create function information
-    let mut is_leaf = true;
-    let mut max_arg_num = 0;
-    for value in self.dfg().values().values() {
-      match value.kind() {
-        ValueKind::Call(call) => {
-          is_leaf = false;
-          if call.args().len() > max_arg_num {
-            max_arg_num = call.args().len();
-          }
-        }
-        _ => {}
-      }
+    // skip declarations
+    if self.layout().entry_bb().is_none() {
+      return Ok(());
     }
-    let mut func = FunctionInfo::new(is_leaf, max_arg_num);
-    // generate allocations in entry basic block
-    for &inst in self.layout().bbs()[&entry_bb].insts().keys() {
-      let data = self.dfg().value(inst);
-      match data.kind() {
-        ValueKind::Alloc(_) => func.new_alloc(inst, data.ty()),
-        _ => {}
+    // allocation stack slots and log argument number
+    let func = cur_func_mut!(info);
+    for value in self.dfg().values().values() {
+      if value.kind().is_local_inst() {
+        // allocate stack slot
+        if !value.used_by().is_empty() && !value.ty().is_unit() {
+          func.alloc_slot(value);
+        }
+        // log argument number
+        if let ValueKind::Call(call) = value.kind() {
+          func.log_arg_num(call.args().len());
+        }
       }
     }
     // generate basic block names
@@ -136,8 +120,6 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for FunctionData {
     }
     // generate prologue
     AsmBuilder::new(f, "t0").prologue(self.name(), &func)?;
-    // update function information
-    info.cur_func = Some(func);
     // generate instructions in basic blocks
     for (bb, node) in self.layout().bbs() {
       let name = bb.generate(f, info)?;
@@ -176,15 +158,109 @@ impl<'p, 'i> GenerateAsm<'p, 'i> for Value {
         },
       )))
     } else {
-      Ok(match cur_func!(info).size_of(*self) {
-        Some(slot) => AsmValue::Local(slot),
-        None => AsmValue::Temp,
+      let func = cur_func!(info);
+      let value = info.program.func(func.func()).dfg().value(*self);
+      Ok(match value.kind() {
+        ValueKind::Integer(i) => AsmValue::Const(i.value()),
+        _ => AsmValue::Local(func.slot_offset(value)),
       })
     }
   }
 }
 
 impl<'p, 'i> GenerateAsm<'p, 'i> for ValueData {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    match self.kind() {
+      ValueKind::GlobalAlloc(v) => v.generate(f, info),
+      ValueKind::Load(v) => v.generate(f, info),
+      ValueKind::Store(v) => v.generate(f, info),
+      ValueKind::GetPtr(v) => v.generate(f, info),
+      ValueKind::GetElemPtr(v) => v.generate(f, info),
+      ValueKind::Binary(v) => v.generate(f, info),
+      ValueKind::Branch(v) => v.generate(f, info),
+      ValueKind::Jump(v) => v.generate(f, info),
+      ValueKind::Call(v) => v.generate(f, info),
+      ValueKind::Return(v) => v.generate(f, info),
+      _ => Ok(()),
+    }
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for GlobalAlloc {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Load {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Store {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for GetPtr {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for GetElemPtr {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Binary {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Branch {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Jump {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Call {
+  type Out = ();
+
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
+    todo!()
+  }
+}
+
+impl<'p, 'i> GenerateAsm<'p, 'i> for Return {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
