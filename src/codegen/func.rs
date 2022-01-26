@@ -1,22 +1,25 @@
-use koopa::ir::{BasicBlock, Type, Value};
+use koopa::ir::entities::ValueData;
+use koopa::ir::{BasicBlock, Function, TypeKind, ValueKind};
 use std::collections::HashMap;
 
 /// Function information.
 pub struct FunctionInfo {
-  is_leaf: bool,
-  max_arg_num: usize,
+  func: Function,
+  /// Maximum argument number of call instructions in the function.
+  /// `None` if the current function is a leaf function.
+  max_arg_num: Option<usize>,
   alloc_size: usize,
-  allocs: HashMap<Value, usize>,
+  allocs: HashMap<*const ValueData, usize>,
   next_temp_label_id: usize,
   bbs: HashMap<BasicBlock, String>,
 }
 
 impl FunctionInfo {
   /// Creates a new function information.
-  pub fn new(is_leaf: bool, max_arg_num: usize) -> Self {
+  pub fn new(func: Function) -> Self {
     Self {
-      is_leaf,
-      max_arg_num,
+      func,
+      max_arg_num: None,
       alloc_size: 0,
       allocs: HashMap::new(),
       next_temp_label_id: 0,
@@ -24,34 +27,47 @@ impl FunctionInfo {
     }
   }
 
+  /// Returns the current function.
+  pub fn func(&self) -> Function {
+    self.func
+  }
+
+  /// Logs argument number.
+  pub fn log_arg_num(&mut self, arg_num: usize) {
+    if arg_num > self.max_arg_num.unwrap_or(0) {
+      self.max_arg_num = Some(arg_num);
+    }
+  }
+
   /// Returns `true` if the current function is a leaf function.
   pub fn is_leaf(&self) -> bool {
-    self.is_leaf
+    self.max_arg_num.is_none()
   }
 
-  /// Returns the maximum argument number of call instructions in function.
-  pub fn max_arg_num(&self) -> usize {
-    self.max_arg_num
+  /// Allocates a new stack slot for the given value data.
+  pub fn alloc_slot(&mut self, value: &ValueData) {
+    self.allocs.insert(value, self.alloc_size);
+    self.alloc_size += match value.kind() {
+      ValueKind::Alloc(_) => match value.ty().kind() {
+        TypeKind::Pointer(base) => base.size(),
+        _ => unreachable!(),
+      },
+      _ => value.ty().size(),
+    };
   }
 
-  /// Creates a new stack slot allocation.
-  pub fn new_alloc(&mut self, alloc: Value, ty: &Type) {
-    self.allocs.insert(alloc, self.alloc_size);
-    self.alloc_size += ty.size();
-  }
-
-  /// Returns the size of the given allocation.
-  pub fn size_of(&self, alloc: Value) -> Option<usize> {
-    self.allocs.get(&alloc).copied()
+  /// Returns the slot offset of the given value data.
+  pub fn slot_offset(&self, value: &ValueData) -> usize {
+    *self.allocs.get(&(value as *const ValueData)).unwrap()
   }
 
   /// Logs basic block name.
   pub fn log_bb_name(&mut self, bb: BasicBlock, name: &Option<String>) {
     let name = match name.as_ref() {
-      Some(name) => name.clone(),
+      Some(name) => format!(".{name}"),
       None => {
         self.next_temp_label_id += 1;
-        format!("bb{}", self.next_temp_label_id - 1)
+        format!(".L{}", self.next_temp_label_id - 1)
       }
     };
     self.bbs.insert(bb, name);
@@ -65,15 +81,14 @@ impl FunctionInfo {
   /// Returns the stack pointer offset.
   pub fn sp_offset(&self) -> usize {
     // slot for storing return address
-    let ra = if self.is_leaf { 0 } else { 1 };
-    // slot for storing arguments and temporary arguments
-    let (args, temp_args) = if self.max_arg_num > 8 {
-      (self.max_arg_num - 8, 8)
-    } else {
-      (0, self.max_arg_num)
+    let ra = if self.is_leaf() { 0 } else { 1 };
+    // slot for storing arguments
+    let args = match self.max_arg_num {
+      Some(num) if num > 8 => num - 8,
+      _ => 0,
     };
     // the final offset
-    let offset = ra + args + temp_args + self.alloc_size;
+    let offset = ra + self.alloc_size + args;
     // align to 16 bytes
     (offset + 15) / 16 * 16
   }
