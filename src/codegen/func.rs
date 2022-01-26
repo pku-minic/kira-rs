@@ -7,6 +7,7 @@ pub struct FunctionInfo {
   max_arg_num: usize,
   alloc_size: usize,
   allocs: HashMap<Value, usize>,
+  next_temp_label_id: usize,
   bbs: HashMap<BasicBlock, String>,
 }
 
@@ -18,6 +19,7 @@ impl FunctionInfo {
       max_arg_num,
       alloc_size: 0,
       allocs: HashMap::new(),
+      next_temp_label_id: 0,
       bbs: HashMap::new(),
     }
   }
@@ -41,6 +43,18 @@ impl FunctionInfo {
   /// Returns the size of the given allocation.
   pub fn size_of(&self, alloc: Value) -> Option<usize> {
     self.allocs.get(&alloc).copied()
+  }
+
+  /// Logs basic block name.
+  pub fn log_bb_name(&mut self, bb: BasicBlock, name: &Option<String>) {
+    let name = match name.as_ref() {
+      Some(name) => name.clone(),
+      None => {
+        self.next_temp_label_id += 1;
+        format!("bb{}", self.next_temp_label_id - 1)
+      }
+    };
+    self.bbs.insert(bb, name);
   }
 
   /// Returns a reference to the name of the given basic block.
