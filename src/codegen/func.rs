@@ -22,6 +22,16 @@ impl FunctionInfo {
     }
   }
 
+  /// Returns `true` if the current function is a leaf function.
+  pub fn is_leaf(&self) -> bool {
+    self.is_leaf
+  }
+
+  /// Returns the maximum argument number of call instructions in function.
+  pub fn max_arg_num(&self) -> usize {
+    self.max_arg_num
+  }
+
   /// Creates a new stack slot allocation.
   pub fn new_alloc(&mut self, alloc: Value, ty: &Type) {
     self.allocs.insert(alloc, self.alloc_size);
