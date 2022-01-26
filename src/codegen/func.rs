@@ -57,8 +57,8 @@ impl FunctionInfo {
   }
 
   /// Returns the slot offset of the given value data.
-  pub fn slot_offset(&self, value: &ValueData) -> usize {
-    *self.allocs.get(&(value as *const ValueData)).unwrap()
+  pub fn slot_offset(&self, value: &ValueData) -> Option<usize> {
+    self.allocs.get(&(value as *const ValueData)).copied()
   }
 
   /// Logs basic block name.
