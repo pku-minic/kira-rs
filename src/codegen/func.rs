@@ -1,5 +1,6 @@
 use koopa::ir::entities::ValueData;
 use koopa::ir::{BasicBlock, Function, TypeKind, ValueKind};
+use std::cell::Cell;
 use std::collections::HashMap;
 
 /// Function information.
@@ -12,6 +13,7 @@ pub struct FunctionInfo {
   allocs: HashMap<*const ValueData, usize>,
   next_temp_label_id: usize,
   bbs: HashMap<BasicBlock, String>,
+  sp_offset: Cell<Option<usize>>,
 }
 
 impl FunctionInfo {
@@ -24,6 +26,7 @@ impl FunctionInfo {
       allocs: HashMap::new(),
       next_temp_label_id: 0,
       bbs: HashMap::new(),
+      sp_offset: Cell::new(None),
     }
   }
 
@@ -56,9 +59,14 @@ impl FunctionInfo {
     };
   }
 
-  /// Returns the slot offset of the given value data.
-  pub fn slot_offset(&self, value: &ValueData) -> Option<usize> {
-    self.allocs.get(&(value as *const ValueData)).copied()
+  /// Returns the slot offset (relative to `sp`) of the given value data.
+  pub fn slot_offset(&self, value: &ValueData) -> usize {
+    let offset = self.allocs.get(&(value as *const ValueData)).unwrap();
+    if self.is_leaf() {
+      self.sp_offset() - 4 - self.alloc_size + offset
+    } else {
+      self.sp_offset() - self.alloc_size + offset
+    }
   }
 
   /// Logs basic block name.
@@ -80,16 +88,22 @@ impl FunctionInfo {
 
   /// Returns the stack pointer offset.
   pub fn sp_offset(&self) -> usize {
-    // slot for storing return address
-    let ra = if self.is_leaf() { 0 } else { 1 };
-    // slot for storing arguments
-    let args = match self.max_arg_num {
-      Some(num) if num > 8 => num - 8,
-      _ => 0,
-    };
-    // the final offset
-    let offset = ra + self.alloc_size + args;
-    // align to 16 bytes
-    (offset + 15) / 16 * 16
+    if let Some(sp_offset) = self.sp_offset.get() {
+      sp_offset
+    } else {
+      // slot for storing return address
+      let ra = if self.is_leaf() { 0 } else { 1 };
+      // slot for storing arguments
+      let args = match self.max_arg_num {
+        Some(num) if num > 8 => num - 8,
+        _ => 0,
+      };
+      // the final offset
+      let offset = ra + self.alloc_size + args;
+      // align to 16 bytes
+      let sp_offset = (offset + 15) / 16 * 16;
+      self.sp_offset.set(Some(sp_offset));
+      sp_offset
+    }
   }
 }
