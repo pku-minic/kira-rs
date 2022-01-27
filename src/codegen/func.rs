@@ -11,12 +11,15 @@ pub struct FunctionInfo {
   max_arg_num: Option<usize>,
   alloc_size: usize,
   allocs: HashMap<*const ValueData, usize>,
-  next_temp_label_id: usize,
   bbs: HashMap<BasicBlock, String>,
   sp_offset: Cell<Option<usize>>,
 }
 
 impl FunctionInfo {
+  thread_local! {
+    static NEXT_TEMP_LABEL_ID: Cell<usize> = Cell::new(0);
+  }
+
   /// Creates a new function information.
   pub fn new(func: Function) -> Self {
     Self {
@@ -24,7 +27,6 @@ impl FunctionInfo {
       max_arg_num: None,
       alloc_size: 0,
       allocs: HashMap::new(),
-      next_temp_label_id: 0,
       bbs: HashMap::new(),
       sp_offset: Cell::new(None),
     }
@@ -37,7 +39,7 @@ impl FunctionInfo {
 
   /// Logs argument number.
   pub fn log_arg_num(&mut self, arg_num: usize) {
-    if arg_num > self.max_arg_num.unwrap_or(0) {
+    if self.max_arg_num.is_none() || arg_num > self.max_arg_num.unwrap() {
       self.max_arg_num = Some(arg_num);
     }
   }
@@ -63,20 +65,18 @@ impl FunctionInfo {
   pub fn slot_offset(&self, value: &ValueData) -> usize {
     let offset = self.allocs.get(&(value as *const ValueData)).unwrap();
     if self.is_leaf() {
-      self.sp_offset() - 4 - self.alloc_size + offset
-    } else {
       self.sp_offset() - self.alloc_size + offset
+    } else {
+      self.sp_offset() - 4 - self.alloc_size + offset
     }
   }
 
   /// Logs basic block name.
   pub fn log_bb_name(&mut self, bb: BasicBlock, name: &Option<String>) {
+    let id = Self::NEXT_TEMP_LABEL_ID.with(|id| id.replace(id.get() + 1));
     let name = match name.as_ref() {
-      Some(name) => format!(".{}", &name[1..]),
-      None => {
-        self.next_temp_label_id += 1;
-        format!(".L{}", self.next_temp_label_id - 1)
-      }
+      Some(name) => format!(".L{}_{}", &name[1..], id),
+      None => format!(".L{}", id),
     };
     self.bbs.insert(bb, name);
   }

@@ -87,7 +87,7 @@ impl<'f> AsmBuilder<'f> {
   }
 
   pub fn bnez(&mut self, cond: &str, label: &str) -> Result<()> {
-    writeln!(self.f, "  bnez {cond} {label}")
+    writeln!(self.f, "  bnez {cond}, {label}")
   }
 
   pub fn j(&mut self, label: &str) -> Result<()> {
