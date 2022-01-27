@@ -53,6 +53,7 @@ enum AsmValue<'i> {
   Global(&'i str),
   Local(usize),
   Const(i32),
+  Arg(usize),
 }
 
 /// Returns the assembly value of the given value data.
@@ -73,6 +74,7 @@ impl<'i> AsmValue<'i> {
       }
       Self::Local(offset) => builder.lw(reg, "sp", *offset as i32),
       Self::Const(num) => builder.li(reg, *num),
+      _ => unreachable!(),
     }
   }
 
@@ -82,7 +84,22 @@ impl<'i> AsmValue<'i> {
     match self {
       Self::Global(symbol) => builder.la(reg, symbol),
       Self::Local(offset) => builder.addi(reg, "sp", *offset as i32),
-      Self::Const(_) => unreachable!(),
+      _ => unreachable!(),
+    }
+  }
+
+  /// Writes the assembly value (argument) to the given register.
+  fn write_arg_to(&self, f: &mut File, reg: &'static str, sp_offset: usize) -> Result<()> {
+    let mut builder = AsmBuilder::new(f, reg);
+    match self {
+      Self::Arg(index) => {
+        if *index < 8 {
+          builder.mv(reg, &format!("a{}", *index))
+        } else {
+          builder.lw(reg, "sp", (sp_offset + (*index - 8) * 4) as i32)
+        }
+      }
+      _ => unreachable!(),
     }
   }
 
@@ -96,6 +113,38 @@ impl<'i> AsmValue<'i> {
       }
       Self::Local(offset) => builder.sw(reg, "sp", *offset as i32),
       Self::Const(_) => unreachable!(),
+      Self::Arg(index) => {
+        if *index < 8 {
+          builder.mv(&format!("a{}", *index), reg)
+        } else {
+          builder.sw(reg, "sp", ((*index - 8) * 4) as i32)
+        }
+      }
+    }
+  }
+}
+
+impl<'i> From<LocalValue> for AsmValue<'i> {
+  fn from(v: LocalValue) -> Self {
+    match v {
+      LocalValue::Local(offset) => Self::Local(offset),
+      LocalValue::Const(num) => Self::Const(num),
+    }
+  }
+}
+
+/// A local value (simplified version of assembly value).
+enum LocalValue {
+  Local(usize),
+  Const(i32),
+}
+
+impl<'i> From<AsmValue<'i>> for LocalValue {
+  fn from(value: AsmValue) -> Self {
+    match value {
+      AsmValue::Local(offset) => Self::Local(offset),
+      AsmValue::Const(num) => Self::Const(num),
+      _ => unreachable!(),
     }
   }
 }
@@ -211,6 +260,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Value {
       let value = info.program.func(func.func()).dfg().value(*self);
       Ok(match value.kind() {
         ValueKind::Integer(i) => AsmValue::Const(i.value()),
+        ValueKind::FuncArgRef(i) => AsmValue::Arg(i.index()),
         _ => AsmValue::Local(func.slot_offset(value)),
       })
     }
@@ -233,7 +283,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for ValueData {
       ValueKind::Binary(v) => v.generate(f, info, self),
       ValueKind::Branch(v) => v.generate(f, info),
       ValueKind::Jump(v) => v.generate(f, info),
-      ValueKind::Call(v) => v.generate(f, info),
+      ValueKind::Call(v) => v.generate(f, info, self),
       ValueKind::Return(v) => v.generate(f, info),
       _ => Ok(()),
     }
@@ -288,7 +338,13 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Store {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    self.value().generate(f, info)?.write_to(f, "t0")?;
+    let sp_offset = cur_func!(info).sp_offset();
+    let value = self.value().generate(f, info)?;
+    if matches!(value, AsmValue::Arg(_)) {
+      value.write_arg_to(f, "t0", sp_offset)?;
+    } else {
+      value.write_to(f, "t0")?;
+    }
     self.dest().generate(f, info)?.read_from(f, "t0", "t1")
   }
 }
@@ -305,7 +361,7 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for GetPtr {
     };
     let mut builder = AsmBuilder::new(f, "t2");
     builder.muli("t1", "t1", size as i32)?;
-    builder.add("t0", "t0", "t1")?;
+    builder.op2("add", "t0", "t0", "t1")?;
     asm_value!(info, v).read_from(f, "t0", "t1")
   }
 }
@@ -325,7 +381,7 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for GetElemPtr {
     };
     let mut builder = AsmBuilder::new(f, "t2");
     builder.muli("t1", "t1", size as i32)?;
-    builder.add("t0", "t0", "t1")?;
+    builder.op2("add", "t0", "t0", "t1")?;
     asm_value!(info, v).read_from(f, "t0", "t1")
   }
 }
@@ -334,7 +390,41 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for Binary {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo, v: &ValueData) -> Result<Self::Out> {
-    todo!()
+    self.lhs().generate(f, info)?.write_to(f, "t0")?;
+    self.rhs().generate(f, info)?.write_to(f, "t1")?;
+    let mut builder = AsmBuilder::new(f, "t2");
+    match self.op() {
+      BinaryOp::NotEq => {
+        builder.op2("xor", "t0", "t0", "t1")?;
+        builder.op1("snez", "t0", "t0")?;
+      }
+      BinaryOp::Eq => {
+        builder.op2("xor", "t0", "t0", "t1")?;
+        builder.op1("seqz", "t0", "t0")?;
+      }
+      BinaryOp::Gt => builder.op2("sgt", "t0", "t0", "t1")?,
+      BinaryOp::Lt => builder.op2("slt", "t0", "t0", "t1")?,
+      BinaryOp::Ge => {
+        builder.op2("slt", "t0", "t0", "t1")?;
+        builder.op1("seqz", "t0", "t0")?;
+      }
+      BinaryOp::Le => {
+        builder.op2("sgt", "t0", "t0", "t1")?;
+        builder.op1("seqz", "t0", "t0")?;
+      }
+      BinaryOp::Add => builder.op2("add", "t0", "t0", "t1")?,
+      BinaryOp::Sub => builder.op2("sub", "t0", "t0", "t1")?,
+      BinaryOp::Mul => builder.op2("mul", "t0", "t0", "t1")?,
+      BinaryOp::Div => builder.op2("div", "t0", "t0", "t1")?,
+      BinaryOp::Mod => builder.op2("rem", "t0", "t0", "t1")?,
+      BinaryOp::And => builder.op2("and", "t0", "t0", "t1")?,
+      BinaryOp::Or => builder.op2("or", "t0", "t0", "t1")?,
+      BinaryOp::Xor => builder.op2("xor", "t0", "t0", "t1")?,
+      BinaryOp::Shl => builder.op2("sll", "t0", "t0", "t1")?,
+      BinaryOp::Shr => builder.op2("srl", "t0", "t0", "t1")?,
+      BinaryOp::Sar => builder.op2("sra", "t0", "t0", "t1")?,
+    }
+    asm_value!(info, v).read_from(f, "t0", "t1")
   }
 }
 
@@ -342,7 +432,11 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Branch {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    todo!()
+    self.cond().generate(f, info)?.write_to(f, "t0")?;
+    let tlabel = self.true_bb().generate(f, info)?;
+    AsmBuilder::new(f, "t1").bnez("t0", tlabel)?;
+    let flabel = self.false_bb().generate(f, info)?;
+    AsmBuilder::new(f, "t1").j(flabel)
   }
 }
 
@@ -350,15 +444,27 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Jump {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    todo!()
+    let label = self.target().generate(f, info)?;
+    AsmBuilder::new(f, "t0").j(label)
   }
 }
 
-impl<'p, 'i> GenerateToAsm<'p, 'i> for Call {
+impl<'p, 'i> GenerateValueToAsm<'p, 'i> for Call {
   type Out = ();
 
-  fn generate(&self, f: &mut File, info: &mut ProgramInfo) -> Result<Self::Out> {
-    todo!()
+  fn generate(&self, f: &mut File, info: &mut ProgramInfo, v: &ValueData) -> Result<Self::Out> {
+    let args = self
+      .args()
+      .iter()
+      .map(|v| Ok(v.generate(f, info)?.into()))
+      .collect::<Result<Vec<LocalValue>>>()?;
+    for (i, arg) in args.into_iter().enumerate() {
+      AsmValue::from(arg).write_to(f, "t0")?;
+      AsmValue::Arg(i).read_from(f, "t0", "t1")?;
+    }
+    let callee = self.callee().generate(f, info)?;
+    AsmBuilder::new(f, "t0").call(callee)?;
+    asm_value!(info, v).read_from(f, "a0", "t0")
   }
 }
 
