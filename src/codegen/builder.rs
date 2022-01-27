@@ -18,6 +18,18 @@ impl<'f> AsmBuilder<'f> {
     writeln!(self.f, "  li {dest}, {imm}")
   }
 
+  pub fn la(&mut self, dest: &str, symbol: &str) -> Result<()> {
+    writeln!(self.f, "  la {dest}, {symbol}")
+  }
+
+  pub fn mv(&mut self, dest: &str, src: &str) -> Result<()> {
+    if dest != src {
+      writeln!(self.f, "  mv {dest}, {src}")
+    } else {
+      Ok(())
+    }
+  }
+
   pub fn addi(&mut self, dest: &str, opr: &str, offset: i32) -> Result<()> {
     if offset >= -2048 && offset <= 2047 {
       writeln!(self.f, "  addi {dest}, {opr}, {offset}")
