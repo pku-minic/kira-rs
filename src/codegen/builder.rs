@@ -30,8 +30,12 @@ impl<'f> AsmBuilder<'f> {
     }
   }
 
-  pub fn add(&mut self, dest: &str, lhs: &str, rhs: &str) -> Result<()> {
-    writeln!(self.f, "  add {dest}, {lhs}, {rhs}")
+  pub fn op2(&mut self, op: &str, dest: &str, lhs: &str, rhs: &str) -> Result<()> {
+    writeln!(self.f, "  {op} {dest}, {lhs}, {rhs}")
+  }
+
+  pub fn op1(&mut self, op: &str, dest: &str, src: &str) -> Result<()> {
+    writeln!(self.f, "  {op} {dest}, {src}")
   }
 
   pub fn addi(&mut self, dest: &str, opr: &str, imm: i32) -> Result<()> {
@@ -47,10 +51,6 @@ impl<'f> AsmBuilder<'f> {
     writeln!(self.f, "  slli {dest}, {opr}, {imm}")
   }
 
-  pub fn mul(&mut self, dest: &str, lhs: &str, rhs: &str) -> Result<()> {
-    writeln!(self.f, "  mul {dest}, {lhs}, {rhs}")
-  }
-
   pub fn muli(&mut self, dest: &str, opr: &str, imm: i32) -> Result<()> {
     if imm == 0 {
       self.mv(dest, "x0")
@@ -64,7 +64,7 @@ impl<'f> AsmBuilder<'f> {
       self.slli(dest, opr, shift)
     } else {
       self.li(self.temp, imm)?;
-      self.mul(dest, opr, self.temp)
+      self.op2("mul", dest, opr, self.temp)
     }
   }
 
@@ -84,6 +84,18 @@ impl<'f> AsmBuilder<'f> {
       self.addi(self.temp, addr, offset)?;
       writeln!(self.f, "  lw {dest}, 0({})", self.temp)
     }
+  }
+
+  pub fn bnez(&mut self, cond: &str, label: &str) -> Result<()> {
+    writeln!(self.f, "  bnez {cond} {label}")
+  }
+
+  pub fn j(&mut self, label: &str) -> Result<()> {
+    writeln!(self.f, "  j {label}")
+  }
+
+  pub fn call(&mut self, func: &str) -> Result<()> {
+    writeln!(self.f, "  call {func}")
   }
 
   pub fn prologue(&mut self, func_name: &str, info: &FunctionInfo) -> Result<()> {
