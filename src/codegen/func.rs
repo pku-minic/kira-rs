@@ -10,7 +10,7 @@ pub struct FunctionInfo {
   /// `None` if the current function is a leaf function.
   max_arg_num: Option<usize>,
   alloc_size: usize,
-  allocs: HashMap<*const ValueData, usize>,
+  allocs: HashMap<*const ValueData, Slot>,
   bbs: HashMap<BasicBlock, String>,
   sp_offset: Cell<Option<usize>>,
 }
@@ -51,23 +51,30 @@ impl FunctionInfo {
 
   /// Allocates a new stack slot for the given value data.
   pub fn alloc_slot(&mut self, value: &ValueData) {
-    self.allocs.insert(value, self.alloc_size);
-    self.alloc_size += match value.kind() {
-      ValueKind::Alloc(_) => match value.ty().kind() {
-        TypeKind::Pointer(base) => base.size(),
-        _ => unreachable!(),
-      },
-      _ => value.ty().size(),
+    match value.kind() {
+      ValueKind::Alloc(_) => {
+        self.allocs.insert(value, Slot::new(self.alloc_size, false));
+        self.alloc_size += match value.ty().kind() {
+          TypeKind::Pointer(base) => base.size(),
+          _ => unreachable!(),
+        };
+      }
+      _ => {
+        let is_ptr = matches!(value.ty().kind(), TypeKind::Pointer(_));
+        let slot = Slot::new(self.alloc_size, is_ptr);
+        self.allocs.insert(value, slot);
+        self.alloc_size += value.ty().size();
+      }
     };
   }
 
   /// Returns the slot offset (relative to `sp`) of the given value data.
-  pub fn slot_offset(&self, value: &ValueData) -> usize {
-    let offset = self.allocs.get(&(value as *const ValueData)).unwrap();
+  pub fn slot_offset(&self, value: &ValueData) -> Slot {
+    let offset = *self.allocs.get(&(value as *const ValueData)).unwrap();
     if self.is_leaf() {
-      self.sp_offset() - self.alloc_size + offset
+      offset.map(|o| self.sp_offset() - self.alloc_size + o)
     } else {
-      self.sp_offset() - 4 - self.alloc_size + offset
+      offset.map(|o| self.sp_offset() - 4 - self.alloc_size + o)
     }
   }
 
@@ -104,6 +111,32 @@ impl FunctionInfo {
       let sp_offset = (offset + 15) / 16 * 16;
       self.sp_offset.set(Some(sp_offset));
       sp_offset
+    }
+  }
+}
+
+/// A stack slot.
+#[derive(Clone, Copy)]
+pub struct Slot {
+  pub offset: usize,
+  /// `true` if the slot stores an pointer but not an allocation.
+  pub is_ptr: bool,
+}
+
+impl Slot {
+  /// Creates a new stack slot.
+  fn new(offset: usize, is_ptr: bool) -> Self {
+    Self { offset, is_ptr }
+  }
+
+  /// Maps the offset by applying the given function.
+  fn map<F>(self, f: F) -> Self
+  where
+    F: FnOnce(usize) -> usize,
+  {
+    Self {
+      offset: f(self.offset),
+      is_ptr: self.is_ptr,
     }
   }
 }
