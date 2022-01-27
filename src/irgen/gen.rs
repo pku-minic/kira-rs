@@ -102,16 +102,15 @@ impl<'ast> GenerateProgram<'ast> for ConstDef {
         _ => unreachable!(),
       }
     } else {
-      let value = init.into_const(program, scopes)?;
       let value = if scopes.is_global() {
-        let value = program.new_value().global_alloc(value);
+        let init = init.into_const(program, scopes)?;
+        let value = program.new_value().global_alloc(init);
         program.set_value_name(value, Some(format!("@{}", self.id)));
         value
       } else {
         let info = cur_func!(scopes);
         let alloc = info.new_alloc(program, ty, Some(&self.id));
-        let store = info.new_value(program).store(value, alloc);
-        info.push_inst(program, store);
+        init.into_stores(program, scopes, alloc);
         alloc
       };
       // add to scope
