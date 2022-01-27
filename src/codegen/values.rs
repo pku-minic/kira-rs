@@ -1,11 +1,12 @@
 use super::builder::AsmBuilder;
+use super::func::Slot;
 use std::fs::File;
 use std::io::Result;
 
 /// A global/local value.
 pub enum AsmValue<'i> {
   Global(&'i str),
-  Local(usize),
+  Local(Slot),
   Const(i32),
   Arg(usize),
 }
@@ -19,6 +20,11 @@ macro_rules! asm_value {
 pub(crate) use asm_value;
 
 impl<'i> AsmValue<'i> {
+  /// Returns `true` if the value is a pointer.
+  pub fn is_ptr(&self) -> bool {
+    matches!(self, Self::Local(slot) if slot.is_ptr)
+  }
+
   /// Writes the assembly value to the given register.
   pub fn write_to(&self, f: &mut File, reg: &'static str) -> Result<()> {
     let mut builder = AsmBuilder::new(f, reg);
@@ -27,7 +33,7 @@ impl<'i> AsmValue<'i> {
         builder.la(reg, symbol)?;
         builder.lw(reg, reg, 0)
       }
-      Self::Local(offset) => builder.lw(reg, "sp", *offset as i32),
+      Self::Local(slot) => builder.lw(reg, "sp", slot.offset as i32),
       Self::Const(num) => builder.li(reg, *num),
       _ => unreachable!(),
     }
@@ -38,7 +44,7 @@ impl<'i> AsmValue<'i> {
     let mut builder = AsmBuilder::new(f, reg);
     match self {
       Self::Global(symbol) => builder.la(reg, symbol),
-      Self::Local(offset) => builder.addi(reg, "sp", *offset as i32),
+      Self::Local(slot) => builder.addi(reg, "sp", slot.offset as i32),
       _ => unreachable!(),
     }
   }
@@ -66,7 +72,7 @@ impl<'i> AsmValue<'i> {
         builder.la(temp, symbol)?;
         builder.sw(reg, temp, 0)
       }
-      Self::Local(offset) => builder.sw(reg, "sp", *offset as i32),
+      Self::Local(slot) => builder.sw(reg, "sp", slot.offset as i32),
       Self::Const(_) => unreachable!(),
       Self::Arg(index) => {
         if *index < 8 {
@@ -82,7 +88,7 @@ impl<'i> AsmValue<'i> {
 impl<'i> From<LocalValue> for AsmValue<'i> {
   fn from(v: LocalValue) -> Self {
     match v {
-      LocalValue::Local(offset) => Self::Local(offset),
+      LocalValue::Local(slot) => Self::Local(slot),
       LocalValue::Const(num) => Self::Const(num),
     }
   }
@@ -90,14 +96,14 @@ impl<'i> From<LocalValue> for AsmValue<'i> {
 
 /// A local value (simplified version of assembly value).
 pub enum LocalValue {
-  Local(usize),
+  Local(Slot),
   Const(i32),
 }
 
 impl<'i> From<AsmValue<'i>> for LocalValue {
   fn from(value: AsmValue) -> Self {
     match value {
-      AsmValue::Local(offset) => Self::Local(offset),
+      AsmValue::Local(slot) => Self::Local(slot),
       AsmValue::Const(num) => Self::Const(num),
       _ => unreachable!(),
     }
