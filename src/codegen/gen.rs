@@ -40,7 +40,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Program {
       writeln!(f, "  .globl {name}")?;
       writeln!(f, "{name}:")?;
       data.generate(f, info)?;
-      writeln!(f, "")?;
+      writeln!(f)?;
     }
     // generate functions
     for &func in self.func_layout() {
@@ -95,7 +95,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for FunctionData {
         self.dfg().value(inst).generate(f, info)?;
       }
     }
-    writeln!(f, "")
+    writeln!(f)
   }
 }
 
