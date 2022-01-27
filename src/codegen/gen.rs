@@ -187,7 +187,11 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for Load {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo, v: &ValueData) -> Result<Self::Out> {
-    self.src().generate(f, info)?.write_to(f, "t0")?;
+    let src = self.src().generate(f, info)?;
+    src.write_to(f, "t0")?;
+    if src.is_ptr() {
+      AsmBuilder::new(f, "t1").lw("t0", "t0", 0)?;
+    }
     asm_value!(info, v).read_from(f, "t0", "t1")
   }
 }
@@ -203,7 +207,13 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Store {
     } else {
       value.write_to(f, "t0")?;
     }
-    self.dest().generate(f, info)?.read_from(f, "t0", "t1")
+    let dest = self.dest().generate(f, info)?;
+    if dest.is_ptr() {
+      dest.write_to(f, "t1")?;
+      AsmBuilder::new(f, "t2").sw("t0", "t1", 0)
+    } else {
+      dest.read_from(f, "t0", "t1")
+    }
   }
 }
 
@@ -211,7 +221,12 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for GetPtr {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo, v: &ValueData) -> Result<Self::Out> {
-    self.src().generate(f, info)?.write_addr_to(f, "t0")?;
+    let src = self.src().generate(f, info)?;
+    if src.is_ptr() {
+      src.write_to(f, "t0")?;
+    } else {
+      src.write_addr_to(f, "t0")?;
+    }
     self.index().generate(f, info)?.write_to(f, "t1")?;
     let size = match v.ty().kind() {
       TypeKind::Pointer(base) => base.size(),
@@ -228,7 +243,12 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for GetElemPtr {
   type Out = ();
 
   fn generate(&self, f: &mut File, info: &mut ProgramInfo, v: &ValueData) -> Result<Self::Out> {
-    self.src().generate(f, info)?.write_addr_to(f, "t0")?;
+    let src = self.src().generate(f, info)?;
+    if src.is_ptr() {
+      src.write_to(f, "t0")?;
+    } else {
+      src.write_addr_to(f, "t0")?;
+    }
     self.index().generate(f, info)?.write_to(f, "t1")?;
     let size = match v.ty().kind() {
       TypeKind::Pointer(base) => base.size(),
