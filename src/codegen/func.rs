@@ -72,7 +72,7 @@ impl FunctionInfo {
   /// Logs basic block name.
   pub fn log_bb_name(&mut self, bb: BasicBlock, name: &Option<String>) {
     let name = match name.as_ref() {
-      Some(name) => format!(".{name}"),
+      Some(name) => format!(".{}", &name[1..]),
       None => {
         self.next_temp_label_id += 1;
         format!(".L{}", self.next_temp_label_id - 1)

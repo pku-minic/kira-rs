@@ -46,7 +46,6 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Program {
     for &func in self.func_layout() {
       info.set_cur_func(FunctionInfo::new(func));
       self.func(func).generate(f, info)?;
-      writeln!(f, "")?;
     }
     Ok(())
   }
@@ -56,7 +55,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Function {
   type Out = &'p str;
 
   fn generate(&self, _: &mut File, info: &mut ProgramInfo<'p>) -> Result<Self::Out> {
-    Ok(info.program().func(*self).name())
+    Ok(&info.program().func(*self).name()[1..])
   }
 }
 
@@ -96,7 +95,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for FunctionData {
         self.dfg().value(inst).generate(f, info)?;
       }
     }
-    Ok(())
+    writeln!(f, "")
   }
 }
 
@@ -232,10 +231,7 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for GetElemPtr {
     self.src().generate(f, info)?.write_addr_to(f, "t0")?;
     self.index().generate(f, info)?.write_to(f, "t1")?;
     let size = match v.ty().kind() {
-      TypeKind::Pointer(base) => match base.kind() {
-        TypeKind::Array(base, _) => base.size(),
-        _ => unreachable!(),
-      },
+      TypeKind::Pointer(base) => base.size(),
       _ => unreachable!(),
     };
     let mut builder = AsmBuilder::new(f, "t2");
@@ -323,7 +319,11 @@ impl<'p, 'i> GenerateValueToAsm<'p, 'i> for Call {
     }
     let callee = self.callee().generate(f, info)?;
     AsmBuilder::new(f, "t0").call(callee)?;
-    asm_value!(info, v).read_from(f, "a0", "t0")
+    if !v.used_by().is_empty() {
+      asm_value!(info, v).read_from(f, "a0", "t0")
+    } else {
+      Ok(())
+    }
   }
 }
 
