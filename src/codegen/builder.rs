@@ -30,12 +30,41 @@ impl<'f> AsmBuilder<'f> {
     }
   }
 
-  pub fn addi(&mut self, dest: &str, opr: &str, offset: i32) -> Result<()> {
-    if offset >= -2048 && offset <= 2047 {
-      writeln!(self.f, "  addi {dest}, {opr}, {offset}")
+  pub fn add(&mut self, dest: &str, lhs: &str, rhs: &str) -> Result<()> {
+    writeln!(self.f, "  add {dest}, {lhs}, {rhs}")
+  }
+
+  pub fn addi(&mut self, dest: &str, opr: &str, imm: i32) -> Result<()> {
+    if imm >= -2048 && imm <= 2047 {
+      writeln!(self.f, "  addi {dest}, {opr}, {imm}")
     } else {
-      self.li(self.temp, offset)?;
+      self.li(self.temp, imm)?;
       writeln!(self.f, "  add {dest}, {opr}, {}", self.temp)
+    }
+  }
+
+  pub fn slli(&mut self, dest: &str, opr: &str, imm: usize) -> Result<()> {
+    writeln!(self.f, "  slli {dest}, {opr}, {imm}")
+  }
+
+  pub fn mul(&mut self, dest: &str, lhs: &str, rhs: &str) -> Result<()> {
+    writeln!(self.f, "  mul {dest}, {lhs}, {rhs}")
+  }
+
+  pub fn muli(&mut self, dest: &str, opr: &str, imm: i32) -> Result<()> {
+    if imm == 0 {
+      self.mv(dest, "x0")
+    } else if imm > 0 && (imm & (imm - 1)) == 0 {
+      let mut shift = 0;
+      let mut imm = imm >> 1;
+      while imm != 0 {
+        shift += 1;
+        imm >>= 1;
+      }
+      self.slli(dest, opr, shift)
+    } else {
+      self.li(self.temp, imm)?;
+      self.mul(dest, opr, self.temp)
     }
   }
 
