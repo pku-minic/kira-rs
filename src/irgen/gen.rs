@@ -229,10 +229,8 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
       data.dfg_mut().set_value_name(alloc, Some("%ret".into()));
       ret_val = Some(alloc);
     }
-    // insert function to program and scope
-    let func = program.new_func(data);
-    scopes.new_func(&self.id, func)?;
     // update function information
+    let func = program.new_func(data);
     let mut info = FunctionInfo::new(func, entry, end, ret_val);
     info.push_bb(program, entry);
     if let Some(ret_val) = info.ret_val() {
@@ -248,6 +246,8 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
       info.push_inst(program, store);
       scopes.new_value(&param.id, Value::Value(alloc))?;
     }
+    // update scope
+    scopes.new_func(&self.id, func)?;
     scopes.cur_func = Some(info);
     // generate function body
     self.block.generate(program, scopes)?;
