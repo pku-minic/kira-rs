@@ -9,12 +9,13 @@ pub enum AsmValue<'i> {
   Local(Slot),
   Const(i32),
   Arg(usize),
+  Void,
 }
 
 /// Returns the assembly value of the given value data.
 macro_rules! asm_value {
   ($info:expr, $v:expr) => {
-    AsmValue::Local(cur_func!($info).slot_offset($v))
+    AsmValue::from(cur_func!($info).slot_offset($v))
   };
 }
 pub(crate) use asm_value;
@@ -81,6 +82,7 @@ impl<'i> AsmValue<'i> {
           builder.sw(reg, "sp", ((*index - 8) * 4) as i32)
         }
       }
+      Self::Void => Ok(()),
     }
   }
 }
@@ -90,6 +92,15 @@ impl<'i> From<LocalValue> for AsmValue<'i> {
     match v {
       LocalValue::Local(slot) => Self::Local(slot),
       LocalValue::Const(num) => Self::Const(num),
+    }
+  }
+}
+
+impl<'i> From<Option<Slot>> for AsmValue<'i> {
+  fn from(v: Option<Slot>) -> Self {
+    match v {
+      Some(slot) => Self::Local(slot),
+      None => Self::Void,
     }
   }
 }

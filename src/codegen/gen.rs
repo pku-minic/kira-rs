@@ -119,7 +119,7 @@ impl<'p, 'i> GenerateToAsm<'p, 'i> for Value {
       Ok(match value.kind() {
         ValueKind::Integer(i) => AsmValue::Const(i.value()),
         ValueKind::FuncArgRef(i) => AsmValue::Arg(i.index()),
-        _ => AsmValue::Local(func.slot_offset(value)),
+        _ => AsmValue::from(func.slot_offset(value)),
       })
     }
   }

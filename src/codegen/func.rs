@@ -69,13 +69,14 @@ impl FunctionInfo {
   }
 
   /// Returns the slot offset (relative to `sp`) of the given value data.
-  pub fn slot_offset(&self, value: &ValueData) -> Slot {
-    let offset = *self.allocs.get(&(value as *const ValueData)).unwrap();
-    if self.is_leaf() {
-      offset.map(|o| self.sp_offset() - self.alloc_size + o)
-    } else {
-      offset.map(|o| self.sp_offset() - 4 - self.alloc_size + o)
-    }
+  pub fn slot_offset(&self, value: &ValueData) -> Option<Slot> {
+    self.allocs.get(&(value as *const ValueData)).map(|&offset| {
+      if self.is_leaf() {
+        offset.map(|o| self.sp_offset() - self.alloc_size + o)
+      } else {
+        offset.map(|o| self.sp_offset() - 4 - self.alloc_size + o)
+      }
+    })
   }
 
   /// Logs basic block name.
