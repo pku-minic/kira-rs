@@ -554,7 +554,7 @@ impl<'ast> GenerateProgram<'ast> for LVal {
     if dims == 0 {
       Ok(ExpValue::IntPtr(value))
     } else {
-      if !is_ptr_ptr {
+      if !is_ptr_ptr || !self.indices.is_empty() {
         let info = cur_func!(scopes);
         let zero = info.new_value(program).integer(0);
         value = info.new_value(program).get_elem_ptr(value, zero);
