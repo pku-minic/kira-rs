@@ -10,12 +10,12 @@ pub enum Value {
   /// Koopa IR value.
   Value(IrValue),
   /// Constant integer.
-  Const(i64),
+  Const(i32),
 }
 
 /// An initializer.
 pub enum Initializer {
-  Const(i64),
+  Const(i32),
   Value(IrValue),
   List(Vec<Initializer>),
 }

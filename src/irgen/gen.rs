@@ -787,7 +787,7 @@ impl<'ast> GenerateProgram<'ast> for LOrExp {
 }
 
 impl<'ast> GenerateProgram<'ast> for ConstExp {
-  type Out = i64;
+  type Out = i32;
 
   fn generate(&'ast self, _: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     self.eval(scopes).ok_or(Error::FailedToEval)
