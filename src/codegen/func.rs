@@ -100,10 +100,10 @@ impl FunctionInfo {
       sp_offset
     } else {
       // slot for storing return address
-      let ra = if self.is_leaf() { 0 } else { 1 };
+      let ra = if self.is_leaf() { 0 } else { 4 };
       // slot for storing arguments
       let args = match self.max_arg_num {
-        Some(num) if num > 8 => num - 8,
+        Some(num) if num > 8 => (num - 8) * 4,
         _ => 0,
       };
       // the final offset
