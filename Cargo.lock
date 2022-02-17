@@ -191,7 +191,7 @@ checksum = "6bae625344617ea5983f2110d530bd897f6f6e96b3e6a464187c4f79edf8d1d9"
 
 [[package]]
 name = "kira"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "koopa",
  "lalrpop",
