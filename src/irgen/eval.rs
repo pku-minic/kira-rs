@@ -58,7 +58,7 @@ impl Evaluate for MulExp {
         (Some(lhs), Some(rhs)) => match op {
           MulOp::Mul => Some(lhs * rhs),
           MulOp::Div => (rhs != 0).then(|| lhs / rhs),
-          MulOp::Mod => (rhs != 0).then(|| lhs / rhs),
+          MulOp::Mod => (rhs != 0).then(|| lhs % rhs),
         },
         _ => None,
       },
