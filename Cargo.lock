@@ -201,9 +201,9 @@ dependencies = [
 
 [[package]]
 name = "koopa"
-version = "0.0.4"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4176f3e024f1b57c4b08cc6909a23031147fb549bbbd9e21a6cd98b53aab4f"
+checksum = "7815d4853e8d22a826f0d4d8704631b55359eefb0d93496d87c0a69cac86acaf"
 dependencies = [
  "colored",
  "key-node-list",
