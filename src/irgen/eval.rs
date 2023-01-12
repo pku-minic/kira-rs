@@ -57,8 +57,8 @@ impl Evaluate for MulExp {
       Self::MulUnary(lhs, op, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
         (Some(lhs), Some(rhs)) => match op {
           MulOp::Mul => Some(lhs * rhs),
-          MulOp::Div => (rhs != 0).then(|| lhs / rhs),
-          MulOp::Mod => (rhs != 0).then(|| lhs % rhs),
+          MulOp::Div => (rhs != 0).then_some(lhs / rhs),
+          MulOp::Mod => (rhs != 0).then_some(lhs % rhs),
         },
         _ => None,
       },

@@ -94,7 +94,7 @@ impl Initializer {
     Ok(reshaped.pop().unwrap().pop().unwrap())
   }
 
-  fn carry(reshaped: &mut Vec<Vec<Self>>, lens: &[(usize, usize)]) {
+  fn carry(reshaped: &mut [Vec<Self>], lens: &[(usize, usize)]) {
     // perform carry
     for (i, &(len, _)) in lens.iter().enumerate() {
       if reshaped[i].len() == len {
@@ -108,9 +108,9 @@ impl Initializer {
   pub fn into_const(self, program: &mut Program, scopes: &Scopes) -> Result<IrValue> {
     match self {
       Self::Const(num) => Ok(if scopes.is_global() {
-        program.new_value().integer(num as i32)
+        program.new_value().integer(num)
       } else {
-        cur_func!(scopes).new_value(program).integer(num as i32)
+        cur_func!(scopes).new_value(program).integer(num)
       }),
       Self::Value(_) => Err(Error::FailedToEval),
       Self::List(list) => {
@@ -133,7 +133,7 @@ impl Initializer {
     let info = cur_func!(scopes);
     let store = match self {
       Self::Const(num) => {
-        let value = info.new_value(program).integer(num as i32);
+        let value = info.new_value(program).integer(num);
         info.new_value(program).store(value, ptr)
       }
       Self::Value(value) => info.new_value(program).store(value, ptr),

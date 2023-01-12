@@ -39,7 +39,7 @@ impl<'f> AsmBuilder<'f> {
   }
 
   pub fn addi(&mut self, dest: &str, opr: &str, imm: i32) -> Result<()> {
-    if imm >= -2048 && imm <= 2047 {
+    if (-2048..=2047).contains(&imm) {
       writeln!(self.f, "  addi {dest}, {opr}, {imm}")
     } else {
       self.li(self.temp, imm)?;
@@ -69,7 +69,7 @@ impl<'f> AsmBuilder<'f> {
   }
 
   pub fn sw(&mut self, src: &str, addr: &str, offset: i32) -> Result<()> {
-    if offset >= -2048 && offset <= 2047 {
+    if (-2048..=2047).contains(&offset) {
       writeln!(self.f, "  sw {src}, {offset}({addr})")
     } else {
       self.addi(self.temp, addr, offset)?;
@@ -78,7 +78,7 @@ impl<'f> AsmBuilder<'f> {
   }
 
   pub fn lw(&mut self, dest: &str, addr: &str, offset: i32) -> Result<()> {
-    if offset >= -2048 && offset <= 2047 {
+    if (-2048..=2047).contains(&offset) {
       writeln!(self.f, "  lw {dest}, {offset}({addr})")
     } else {
       self.addi(self.temp, addr, offset)?;
