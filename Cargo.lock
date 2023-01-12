@@ -185,13 +185,13 @@ dependencies = [
 
 [[package]]
 name = "key-node-list"
-version = "0.0.4"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49604bf4b251a83c1ce18d8c2064bf86144cf38bd13ba2c3561f1cc395a07e85"
+checksum = "653fee522596ae32adbb1ca91b9553be5b2d8e34556c6148899c9132a7a46295"
 
 [[package]]
 name = "kira"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "koopa",
  "lalrpop",
@@ -201,9 +201,9 @@ dependencies = [
 
 [[package]]
 name = "koopa"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7815d4853e8d22a826f0d4d8704631b55359eefb0d93496d87c0a69cac86acaf"
+checksum = "8fa7a3a98fccb69fd97a23b9b9b1fcb1fcc7985c417760528cbd70eb090bed5a"
 dependencies = [
  "colored",
  "key-node-list",

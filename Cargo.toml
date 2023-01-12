@@ -1,6 +1,6 @@
 [package]
 name = "kira"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2021"
 
@@ -10,4 +10,4 @@ lalrpop = "0.19.7"
 [dependencies]
 lalrpop-util = { version = "0.19.7", features = ["lexer"] }
 regex = "1.5.6"
-koopa = "0.0.5"
+koopa = "0.0.6"
