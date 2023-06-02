@@ -7,6 +7,7 @@ All notable changes to the `kira-rs` will be documented in this file.
 ### Changed
 
 * Bumped dependency `koopa` to version 0.0.7.
+* Bumped dependency `lalrpop` to version 0.20.0.
 
 ## 0.0.3 - 2023-01-12
 
