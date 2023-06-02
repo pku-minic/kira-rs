@@ -2,12 +2,18 @@
 
 All notable changes to the `kira-rs` will be documented in this file.
 
+## 0.0.4 - 2023-06-02
+
+### Changed
+
+* Bumped dependency `koopa` to version 0.0.7.
+
 ## 0.0.3 - 2023-01-12
 
 ### Changed
 
 * Bumped dependency `regex` to version 1.5.6.
-* Bumped dependency `koopac` to version 0.0.6.
+* Bumped dependency `koopa` to version 0.0.6.
 
 ### Fixed
 
