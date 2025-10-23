@@ -1,10 +1,10 @@
 mod builder;
 mod func;
-mod gen;
+mod generate;
 mod info;
 mod values;
 
-use gen::GenerateToAsm;
+use generate::GenerateToAsm;
 use info::ProgramInfo;
 use koopa::ir::{Program, Type};
 use std::fs::File;

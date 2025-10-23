@@ -2,6 +2,15 @@
 
 All notable changes to the `kira-rs` will be documented in this file.
 
+## 0.0.5 - 2025-10-23
+
+### Changed
+
+* Bumped dependency `koopa` to version 0.0.8.
+* Bumped dependency `lalrpop` to version 0.22.2.
+* Bumped dependency `regex` to version 1.12.2.
+* Bumped to Rust 2024 edition.
+
 ## 0.0.4 - 2023-06-02
 
 ### Changed

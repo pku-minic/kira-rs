@@ -1,12 +1,12 @@
 mod eval;
 mod func;
-mod gen;
+mod generate;
 mod scopes;
 mod values;
 
 use crate::ast::{CompUnit, ConstExp};
 use eval::Evaluate;
-use gen::GenerateProgram;
+use generate::GenerateProgram;
 use koopa::ir::{Program, Type};
 use scopes::Scopes;
 use std::fmt;
