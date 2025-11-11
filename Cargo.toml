@@ -10,4 +10,4 @@ lalrpop = "0.22.2"
 [dependencies]
 lalrpop-util = { version = "0.22.2", features = ["lexer"] }
 regex = "1.12.2"
-koopa = "0.0.8"
+koopa = "0.0.9"
