@@ -2,6 +2,12 @@
 
 All notable changes to the `kira-rs` will be documented in this file.
 
+## Unreleased
+
+### Added
+
+* [PR #1](https://github.com/pku-minic/kira-rs/pull/1): feat: support sourcemap of single file, optimize error message.
+
 ## 0.0.5 - 2025-10-23
 
 ### Changed
