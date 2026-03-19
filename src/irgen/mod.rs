@@ -69,8 +69,7 @@ pub(crate) trait DimsToType {
 
 impl DimsToType for Vec<ConstExp> {
   fn to_type(&self, scopes: &Scopes) -> Result<Type> {
-    self.iter().rev().fold(Ok(Type::get_i32()), |b, exp| {
-      let base = b?;
+    self.iter().rev().try_fold(Type::get_i32(), |base, exp| {
       let len = exp.eval(scopes).ok_or(Error::FailedToEval)?;
       (len >= 1)
         .then(|| Type::get_array(base, len as usize))

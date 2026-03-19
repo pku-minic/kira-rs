@@ -1,11 +1,11 @@
 use super::eval::Evaluate;
 use super::func::FunctionInfo;
-use super::scopes::{cur_func, cur_func_mut, Scopes};
+use super::scopes::{Scopes, cur_func, cur_func_mut};
 use super::values::{ExpValue, Initializer, Value};
 use super::{DimsToType, Error, Result};
 use crate::ast::*;
 use koopa::ir::builder_traits::*;
-use koopa::ir::{BinaryOp, FunctionData, Program, Type, TypeKind};
+use koopa::ir::{BinaryOp, Program, Type, TypeKind};
 
 /// Trait for generating Koopa IR program.
 pub trait GenerateProgram<'ast> {
@@ -22,11 +22,7 @@ impl<'ast> GenerateProgram<'ast> for CompUnit {
       scopes
         .new_func(
           name,
-          program.new_func(FunctionData::new_decl(
-            format!("@{}", name),
-            params_ty,
-            ret_ty,
-          )),
+          program.new_func_def(format!("@{}", name), params_ty, ret_ty),
         )
         .unwrap();
     };
@@ -215,7 +211,8 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
       .collect::<Result<Vec<_>>>()?;
     let ret_ty = self.ty.generate(program, scopes)?;
     // create new fucntion
-    let mut data = FunctionData::new(format!("@{}", self.id), params_ty, ret_ty);
+    let func = program.new_func_def(format!("@{}", self.id), params_ty, ret_ty);
+    let data = program.func_mut(func);
     // get parameter list
     let params = data.params().to_owned();
     // generate entry/end/cur block
@@ -230,7 +227,6 @@ impl<'ast> GenerateProgram<'ast> for FuncDef {
       ret_val = Some(alloc);
     }
     // update function information
-    let func = program.new_func(data);
     let mut info = FunctionInfo::new(func, entry, end, ret_val);
     info.push_bb(program, entry);
     if let Some(ret_val) = info.ret_val() {

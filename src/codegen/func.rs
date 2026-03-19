@@ -17,7 +17,7 @@ pub struct FunctionInfo {
 
 impl FunctionInfo {
   thread_local! {
-    static NEXT_TEMP_LABEL_ID: Cell<usize> = Cell::new(0);
+    static NEXT_TEMP_LABEL_ID: Cell<usize> = const { Cell::new(0) };
   }
 
   /// Creates a new function information.
@@ -70,13 +70,16 @@ impl FunctionInfo {
 
   /// Returns the slot offset (relative to `sp`) of the given value data.
   pub fn slot_offset(&self, value: &ValueData) -> Option<Slot> {
-    self.allocs.get(&(value as *const ValueData)).map(|&offset| {
-      if self.is_leaf() {
-        offset.map(|o| self.sp_offset() - self.alloc_size + o)
-      } else {
-        offset.map(|o| self.sp_offset() - 4 - self.alloc_size + o)
-      }
-    })
+    self
+      .allocs
+      .get(&(value as *const ValueData))
+      .map(|&offset| {
+        if self.is_leaf() {
+          offset.map(|o| self.sp_offset() - self.alloc_size + o)
+        } else {
+          offset.map(|o| self.sp_offset() - 4 - self.alloc_size + o)
+        }
+      })
   }
 
   /// Logs basic block name.
@@ -109,7 +112,7 @@ impl FunctionInfo {
       // the final offset
       let offset = ra + self.alloc_size + args;
       // align to 16 bytes
-      let sp_offset = (offset + 15) / 16 * 16;
+      let sp_offset = offset.div_ceil(16) * 16;
       self.sp_offset.set(Some(sp_offset));
       sp_offset
     }
