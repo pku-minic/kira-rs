@@ -2,11 +2,16 @@
 
 All notable changes to the `kira-rs` will be documented in this file.
 
-## Unreleased
+## 0.0.6 - 2026-03-19
 
 ### Added
 
 * [PR #1](https://github.com/pku-minic/kira-rs/pull/1): feat: support sourcemap of single file, optimize error message.
+
+### Changed
+
+* Bumped dependency `koopa` to version 0.0.10.
+* Bumped dependency `lalrpop` to version 0.23.1.
 
 ## 0.0.5 - 2025-10-23
 
