@@ -63,3 +63,31 @@ fn logical_constants_evaluate_required_operands() {
     assert!(matches!(generate_program(&ast), Err(Error::FailedToEval)));
   }
 }
+
+#[test]
+fn parameters_can_shadow_function_names() {
+  for source in [
+    "int f(int putint) { return putint; } int main() { return f(42); }",
+    "int g() { return 1; } int f(int g) { return g; } int main() { return f(42); }",
+    "int f(int f) { return f; } int main() { return f(42); }",
+  ] {
+    let ast = CompUnitParser::new().parse(source).unwrap();
+    assert!(generate_program(&ast).is_ok(), "{source}");
+  }
+}
+
+#[test]
+fn duplicate_parameters_and_global_names_are_rejected() {
+  for source in [
+    "int f(int value, int value) { return value; }",
+    "int putint;",
+    "int f() { return 1; } int f;",
+    "int f; int f() { return 1; }",
+  ] {
+    let ast = CompUnitParser::new().parse(source).unwrap();
+    assert!(
+      matches!(generate_program(&ast), Err(Error::DuplicatedDef)),
+      "{source}"
+    );
+  }
+}

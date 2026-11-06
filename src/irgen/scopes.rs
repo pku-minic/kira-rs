@@ -42,7 +42,7 @@ impl<'ast> Scopes<'ast> {
 
   /// Returns `true` if is currently in global scope.
   pub fn is_global(&self) -> bool {
-    self.cur_func.is_none()
+    self.vals.len() == 1
   }
 
   /// Inserts a new value to the current scope.
