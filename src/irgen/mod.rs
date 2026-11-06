@@ -4,6 +4,9 @@ mod generate;
 mod scopes;
 mod values;
 
+#[cfg(test)]
+mod tests;
+
 use crate::ast::{CompUnit, ConstExp};
 use eval::Evaluate;
 use generate::GenerateProgram;
