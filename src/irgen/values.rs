@@ -1,7 +1,7 @@
-use super::scopes::{cur_func, Scopes};
+use super::scopes::{Scopes, cur_func};
 use super::{Error, Result};
-use koopa::ir::builder_traits::*;
 use koopa::ir::Value as IrValue;
+use koopa::ir::builder_traits::*;
 use koopa::ir::{Program, Type, TypeKind};
 use std::iter::repeat_with;
 

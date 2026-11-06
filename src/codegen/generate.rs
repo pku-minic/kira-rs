@@ -1,7 +1,7 @@
 use super::builder::AsmBuilder;
 use super::func::FunctionInfo;
-use super::info::{cur_func, cur_func_mut, ProgramInfo};
-use super::values::{asm_value, AsmValue, LocalValue};
+use super::info::{ProgramInfo, cur_func, cur_func_mut};
+use super::values::{AsmValue, LocalValue, asm_value};
 use koopa::ir::entities::ValueData;
 use koopa::ir::values::*;
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, TypeKind, Value, ValueKind};

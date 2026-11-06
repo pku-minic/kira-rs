@@ -1,6 +1,6 @@
 use koopa::ir::Value;
-use koopa::ir::{builder::LocalBuilder, builder_traits::*};
 use koopa::ir::{BasicBlock, Function, Program, Type};
+use koopa::ir::{builder::LocalBuilder, builder_traits::*};
 
 /// Function information.
 pub struct FunctionInfo {
