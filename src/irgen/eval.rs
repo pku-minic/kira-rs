@@ -117,10 +117,13 @@ impl Evaluate for LAndExp {
   fn eval(&self, scopes: &Scopes) -> Option<i32> {
     match self {
       Self::Eq(exp) => exp.eval(scopes),
-      Self::LAndEq(lhs, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
-        (Some(lhs), Some(rhs)) => Some((lhs != 0 && rhs != 0) as i32),
-        _ => None,
-      },
+      Self::LAndEq(lhs, rhs) => {
+        if lhs.eval(scopes)? == 0 {
+          Some(0)
+        } else {
+          rhs.eval(scopes).map(|rhs| (rhs != 0) as i32)
+        }
+      }
     }
   }
 }
@@ -129,10 +132,13 @@ impl Evaluate for LOrExp {
   fn eval(&self, scopes: &Scopes) -> Option<i32> {
     match self {
       Self::LAnd(exp) => exp.eval(scopes),
-      Self::LOrLAnd(lhs, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
-        (Some(lhs), Some(rhs)) => Some((lhs != 0 || rhs != 0) as i32),
-        _ => None,
-      },
+      Self::LOrLAnd(lhs, rhs) => {
+        if lhs.eval(scopes)? != 0 {
+          Some(1)
+        } else {
+          rhs.eval(scopes).map(|rhs| (rhs != 0) as i32)
+        }
+      }
     }
   }
 }
