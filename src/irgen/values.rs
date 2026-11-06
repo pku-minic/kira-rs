@@ -98,7 +98,7 @@ impl Initializer {
     // perform carry
     for (i, &(len, _)) in lens.iter().enumerate() {
       if reshaped[i].len() == len {
-        let init = Self::List(reshaped[i].drain(..).collect());
+        let init = Self::List(std::mem::take(&mut reshaped[i]));
         reshaped[i + 1].push(init);
       }
     }
