@@ -2,6 +2,20 @@
 
 All notable changes to the `kira-rs` will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+* Bumped dependency `koopa` to version 0.0.11.
+* Bumped dependency `lalrpop` to version 0.23.2.
+* Bumped dependency `regex` to version 1.13.2.
+
+### Fixed
+
+* Compiler panic when evaluating constant division or remainder by zero, or signed overflow cases like `(-2147483647 - 1) / -1`. These expressions now report a constant evaluation error.
+* Logical `&&` and `||` did not short-circuit in constant expressions, so valid expressions like `0 && (1 / 0)` were rejected.
+* Function parameters were incorrectly rejected as duplicated definitions when their names matched a library function or a previously defined function.
+
 ## 0.0.6 - 2026-03-19
 
 ### Added
