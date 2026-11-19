@@ -1,4 +1,4 @@
-use super::eval::Evaluate;
+use super::check::call_result_type;
 use super::func::FunctionInfo;
 use super::scopes::{Scopes, cur_func, cur_func_mut};
 use super::values::{ExpValue, Initializer, Value};
@@ -89,7 +89,7 @@ impl<'ast> GenerateProgram<'ast> for ConstDef {
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     // generate type and initializer
-    let ty = self.dims.to_type(scopes)?;
+    let ty = self.dims.to_type(program, scopes)?;
     let init = self.init.generate(program, scopes)?.reshape(&ty)?;
     // generate constant
     if ty.is_i32() {
@@ -148,7 +148,7 @@ impl<'ast> GenerateProgram<'ast> for VarDef {
 
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     // generate type and initializer
-    let ty = self.dims.to_type(scopes)?;
+    let ty = self.dims.to_type(program, scopes)?;
     let init = self
       .init
       .as_ref()
@@ -184,7 +184,7 @@ impl<'ast> GenerateProgram<'ast> for InitVal {
     Ok(match self {
       Self::Exp(exp) => {
         if scopes.is_global() {
-          Initializer::Const(exp.eval(scopes).ok_or(Error::FailedToEval)?)
+          Initializer::Const(exp.eval_const(program, scopes)?)
         } else {
           Initializer::Value(exp.generate(program, scopes)?.into_int(program, scopes)?)
         }
@@ -270,9 +270,9 @@ impl<'ast> GenerateProgram<'ast> for FuncType {
 impl<'ast> GenerateProgram<'ast> for FuncFParam {
   type Out = Type;
 
-  fn generate(&'ast self, _: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     Ok(match &self.dims {
-      Some(dims) => Type::get_pointer(dims.to_type(scopes)?),
+      Some(dims) => Type::get_pointer(dims.to_type(program, scopes)?),
       None => Type::get_i32(),
     })
   }
@@ -584,12 +584,14 @@ impl<'ast> GenerateProgram<'ast> for UnaryExp {
       Self::Call(call) => call.generate(program, scopes),
       Self::Unary(op, exp) => {
         let exp = exp.generate(program, scopes)?.into_int(program, scopes)?;
+        let op = match op {
+          UnaryOp::Pos => return Ok(ExpValue::Int(exp)),
+          UnaryOp::Neg => BinaryOp::Sub,
+          UnaryOp::LNot => BinaryOp::Eq,
+        };
         let info = cur_func!(scopes);
         let zero = info.new_value(program).integer(0);
-        let value = match op {
-          UnaryOp::Neg => info.new_value(program).binary(BinaryOp::Sub, zero, exp),
-          UnaryOp::LNot => info.new_value(program).binary(BinaryOp::Eq, exp, zero),
-        };
+        let value = info.new_value(program).binary(op, zero, exp);
         info.push_inst(program, value);
         Ok(ExpValue::Int(value))
       }
@@ -603,11 +605,6 @@ impl<'ast> GenerateProgram<'ast> for FuncCall {
   fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
     // get function from scope
     let func = scopes.func(&self.id)?;
-    // get function type
-    let (params_ty, is_void) = match program.func(func).ty().kind() {
-      TypeKind::Function(params, ret) => (params.clone(), ret.is_unit()),
-      _ => unreachable!(),
-    };
     // generate arguments
     let args = self
       .args
@@ -615,20 +612,17 @@ impl<'ast> GenerateProgram<'ast> for FuncCall {
       .map(|a| a.generate(program, scopes)?.into_val(program, scopes))
       .collect::<Result<Vec<_>>>()?;
     // check argument types
-    if params_ty.len() != args.len() {
-      return Err(Error::ArgMismatch);
-    }
-    for (param_ty, arg) in params_ty.iter().zip(&args) {
-      if param_ty != &scopes.ty(program, *arg) {
-        return Err(Error::ArgMismatch);
-      }
-    }
+    let ret = call_result_type(
+      program,
+      func,
+      args.iter().map(|arg| scopes.ty(program, *arg)),
+    )?;
     // generate function call
     let info = cur_func!(scopes);
     let call = info.new_value(program).call(func, args);
     info.push_inst(program, call);
     // return value if not void
-    if is_void {
+    if ret.is_unit() {
       Ok(ExpValue::Void)
     } else {
       Ok(ExpValue::Int(call))
@@ -785,8 +779,8 @@ impl<'ast> GenerateProgram<'ast> for LOrExp {
 impl<'ast> GenerateProgram<'ast> for ConstExp {
   type Out = i32;
 
-  fn generate(&'ast self, _: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
-    self.eval(scopes).ok_or(Error::FailedToEval)
+  fn generate(&'ast self, program: &mut Program, scopes: &mut Scopes<'ast>) -> Result<Self::Out> {
+    self.exp.eval_const(program, scopes)
   }
 }
 

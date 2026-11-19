@@ -1,3 +1,4 @@
+mod check;
 mod eval;
 mod func;
 mod generate;
@@ -8,7 +9,6 @@ mod values;
 mod tests;
 
 use crate::ast::{CompUnit, ConstExp};
-use eval::Evaluate;
 use generate::GenerateProgram;
 use koopa::ir::{Program, Type};
 use scopes::Scopes;
@@ -22,6 +22,7 @@ pub fn generate_program(comp_unit: &CompUnit) -> Result<Program> {
 }
 
 /// Error returned by IR generator.
+#[derive(PartialEq, Eq)]
 pub enum Error {
   DuplicatedDef,
   SymbolNotFound,
@@ -67,13 +68,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Helper trait for converting dimentions to type.
 pub(crate) trait DimsToType {
-  fn to_type(&self, scopes: &Scopes) -> Result<Type>;
+  fn to_type(&self, program: &Program, scopes: &Scopes) -> Result<Type>;
 }
 
 impl DimsToType for Vec<ConstExp> {
-  fn to_type(&self, scopes: &Scopes) -> Result<Type> {
-    self.iter().rev().try_fold(Type::get_i32(), |base, exp| {
-      let len = exp.eval(scopes).ok_or(Error::FailedToEval)?;
+  fn to_type(&self, program: &Program, scopes: &Scopes) -> Result<Type> {
+    self.iter().rev().try_fold(Type::get_i32(), |base, dim| {
+      let len = dim.exp.eval_const(program, scopes)?;
       (len >= 1)
         .then(|| Type::get_array(base, len as usize))
         .ok_or(Error::InvalidArrayLen)

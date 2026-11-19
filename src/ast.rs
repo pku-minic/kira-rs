@@ -169,6 +169,7 @@ pub struct ConstExp {
 }
 
 pub enum UnaryOp {
+  Pos,
   Neg,
   LNot,
 }
