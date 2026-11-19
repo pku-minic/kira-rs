@@ -5,9 +5,9 @@ authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2024"
 
 [build-dependencies]
-lalrpop = "0.23.1"
+lalrpop = "0.23.2"
 
 [dependencies]
-lalrpop-util = { version = "0.23.1", features = ["lexer"] }
-regex = "1.12.2"
+lalrpop-util = { version = "0.23.2", features = ["lexer"] }
+regex = "1.13.2"
 koopa = "0.0.11"
