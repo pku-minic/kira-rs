@@ -188,9 +188,9 @@ dependencies = [
 
 [[package]]
 name = "key-node-list"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b44fd3cac52c8507289d366d162a73aeec88f78f9dbacfb847867b7a2c0edfc0"
+checksum = "72f9a0d8dc02061dc09a08a3a665cdc49c1657fe84c0b06193d73b3f3bfdf472"
 
 [[package]]
 name = "kira"
@@ -204,9 +204,9 @@ dependencies = [
 
 [[package]]
 name = "koopa"
-version = "0.0.10"
+version = "0.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fac4e88b063e9a5a94fa73c88b9bfd64f4e9eae788e404cd5b2843a21737b59"
+checksum = "1bf0b872ff237b35fe15c0fb8fab6dc636d2799899a053b84a481b271491a436"
 dependencies = [
  "colored",
  "key-node-list",
