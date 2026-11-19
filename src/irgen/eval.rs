@@ -1,150 +1,140 @@
+use super::check::CheckType;
 use super::scopes::Scopes;
 use super::values::Value;
+use super::{Error, Result};
 use crate::ast::*;
+use koopa::ir::Program;
 
-/// Trait for evaluating constant.
-pub trait Evaluate {
-  fn eval(&self, scopes: &Scopes) -> Option<i32>;
-}
-
-impl Evaluate for Exp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+impl Exp {
+  /// Checks all operands, then evaluates the constant with short-circuit semantics.
+  pub(super) fn eval_const(&self, program: &Program, scopes: &Scopes) -> Result<i32> {
+    self.check_int(program, scopes)?;
     self.lor.eval(scopes)
   }
 }
 
+/// Evaluates a type-checked expression.
+trait Evaluate {
+  fn eval(&self, scopes: &Scopes) -> Result<i32>;
+}
+
 impl Evaluate for LVal {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
-    let val = scopes.value(&self.id).ok()?;
-    if self.indices.is_empty() {
-      match val {
-        Value::Const(i) => Some(*i),
-        _ => None,
-      }
-    } else {
-      None
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
+    match scopes.value(&self.id)? {
+      Value::Const(i) => Ok(*i),
+      Value::Value(_) => Err(Error::FailedToEval),
     }
   }
 }
 
 impl Evaluate for PrimaryExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
-      Self::Exp(exp) => exp.eval(scopes),
+      Self::Exp(exp) => exp.lor.eval(scopes),
       Self::LVal(lval) => lval.eval(scopes),
-      Self::Number(num) => Some(*num),
+      Self::Number(num) => Ok(*num),
     }
   }
 }
 
 impl Evaluate for UnaryExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::Primary(primary) => primary.eval(scopes),
-      Self::Call(_) => None,
-      Self::Unary(op, exp) => exp.eval(scopes).map(|exp| match op {
-        UnaryOp::Neg => -exp,
-        UnaryOp::LNot => (exp == 0) as i32,
-      }),
+      Self::Call(_) => Err(Error::FailedToEval),
+      Self::Unary(op, exp) => {
+        let value = exp.eval(scopes)?;
+        Ok(match op {
+          UnaryOp::Pos => value,
+          UnaryOp::Neg => -value,
+          UnaryOp::LNot => (value == 0) as i32,
+        })
+      }
     }
   }
 }
 
 impl Evaluate for MulExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::Unary(exp) => exp.eval(scopes),
-      Self::MulUnary(lhs, op, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
-        (Some(lhs), Some(rhs)) => match op {
-          MulOp::Mul => Some(lhs * rhs),
-          MulOp::Div => lhs.checked_div(rhs),
-          MulOp::Mod => lhs.checked_rem(rhs),
-        },
-        _ => None,
-      },
+      Self::MulUnary(lhs, op, rhs) => {
+        let lhs = lhs.eval(scopes)?;
+        let rhs = rhs.eval(scopes)?;
+        match op {
+          MulOp::Mul => Ok(lhs * rhs),
+          MulOp::Div => lhs.checked_div(rhs).ok_or(Error::FailedToEval),
+          MulOp::Mod => lhs.checked_rem(rhs).ok_or(Error::FailedToEval),
+        }
+      }
     }
   }
 }
 
 impl Evaluate for AddExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::Mul(exp) => exp.eval(scopes),
-      Self::AddMul(lhs, op, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
-        (Some(lhs), Some(rhs)) => Some(match op {
+      Self::AddMul(lhs, op, rhs) => {
+        let lhs = lhs.eval(scopes)?;
+        let rhs = rhs.eval(scopes)?;
+        Ok(match op {
           AddOp::Add => lhs + rhs,
           AddOp::Sub => lhs - rhs,
-        }),
-        _ => None,
-      },
+        })
+      }
     }
   }
 }
 
 impl Evaluate for RelExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::Add(exp) => exp.eval(scopes),
-      Self::RelAdd(lhs, op, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
-        (Some(lhs), Some(rhs)) => Some(match op {
-          RelOp::Lt => (lhs < rhs) as i32,
-          RelOp::Gt => (lhs > rhs) as i32,
-          RelOp::Le => (lhs <= rhs) as i32,
-          RelOp::Ge => (lhs >= rhs) as i32,
-        }),
-        _ => None,
-      },
+      Self::RelAdd(lhs, op, rhs) => {
+        let lhs = lhs.eval(scopes)?;
+        let rhs = rhs.eval(scopes)?;
+        Ok(match op {
+          RelOp::Lt => lhs < rhs,
+          RelOp::Gt => lhs > rhs,
+          RelOp::Le => lhs <= rhs,
+          RelOp::Ge => lhs >= rhs,
+        } as i32)
+      }
     }
   }
 }
 
 impl Evaluate for EqExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::Rel(exp) => exp.eval(scopes),
-      Self::EqRel(lhs, op, rhs) => match (lhs.eval(scopes), rhs.eval(scopes)) {
-        (Some(lhs), Some(rhs)) => Some(match op {
-          EqOp::Eq => (lhs == rhs) as i32,
-          EqOp::Neq => (lhs != rhs) as i32,
-        }),
-        _ => None,
-      },
+      Self::EqRel(lhs, op, rhs) => {
+        let lhs = lhs.eval(scopes)?;
+        let rhs = rhs.eval(scopes)?;
+        Ok(match op {
+          EqOp::Eq => lhs == rhs,
+          EqOp::Neq => lhs != rhs,
+        } as i32)
+      }
     }
   }
 }
 
 impl Evaluate for LAndExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::Eq(exp) => exp.eval(scopes),
-      Self::LAndEq(lhs, rhs) => {
-        if lhs.eval(scopes)? == 0 {
-          Some(0)
-        } else {
-          rhs.eval(scopes).map(|rhs| (rhs != 0) as i32)
-        }
-      }
+      Self::LAndEq(lhs, rhs) => Ok((lhs.eval(scopes)? != 0 && rhs.eval(scopes)? != 0) as i32),
     }
   }
 }
 
 impl Evaluate for LOrExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
+  fn eval(&self, scopes: &Scopes) -> Result<i32> {
     match self {
       Self::LAnd(exp) => exp.eval(scopes),
-      Self::LOrLAnd(lhs, rhs) => {
-        if lhs.eval(scopes)? != 0 {
-          Some(1)
-        } else {
-          rhs.eval(scopes).map(|rhs| (rhs != 0) as i32)
-        }
-      }
+      Self::LOrLAnd(lhs, rhs) => Ok((lhs.eval(scopes)? != 0 || rhs.eval(scopes)? != 0) as i32),
     }
-  }
-}
-
-impl Evaluate for ConstExp {
-  fn eval(&self, scopes: &Scopes) -> Option<i32> {
-    self.exp.eval(scopes)
   }
 }

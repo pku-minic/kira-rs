@@ -145,7 +145,6 @@ UnaryExp: UnaryExp = {
     args.insert(0, arg);
     UnaryExp::Call(FuncCall { id, args })
   },
-  "+" <UnaryExp> => <>,
   <op: UnaryOp> <exp: UnaryExp> => UnaryExp::Unary(op, Box::new(exp)),
 }
 
@@ -202,6 +201,7 @@ Number: i32 = {
 }
 
 UnaryOp: UnaryOp = {
+  "+" => UnaryOp::Pos,
   "-" => UnaryOp::Neg,
   "!" => UnaryOp::LNot,
 }
