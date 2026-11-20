@@ -2,7 +2,7 @@
 
 All notable changes to the `kira-rs` will be documented in this file.
 
-## Unreleased
+## 0.0.7 - 2026-11-20
 
 ### Changed
 
